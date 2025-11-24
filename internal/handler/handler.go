@@ -9,6 +9,7 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+// AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
 func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != `POST` {
