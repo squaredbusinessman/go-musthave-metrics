@@ -1,15 +1,15 @@
 package agent
 
 import (
-	"math/rand/v2"
+	"math/rand"
 	"runtime"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-// collectRuntimeMetrics Функция сбора метрик агентского пакета
-func collectRuntimeMetrics(store *storage.MemStorage, rnd *rand.Rand) {
+// CollectRuntimeMetrics Функция сбора метрик агентского пакета
+func CollectRuntimeMetrics(store *storage.MemStorage, rnd *rand.Rand) {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 

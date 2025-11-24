@@ -8,8 +8,8 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-// reportMetrics функция отправки всех фиксируемых метрик
-func reportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string) {
+// ReportMetrics функция отправки всех фиксируемых метрик
+func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string) {
 	gauges, counters := store.SnapShot()
 	for name, value := range gauges {
 		if err := sendMetric(
