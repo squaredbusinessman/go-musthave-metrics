@@ -1,12 +1,23 @@
 package models
 
-const (
-	Counter = "counter"
-	Gauge   = "gauge"
-)
+type Gauge struct {
+	Value float64
+}
 
-// NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
-// Органичиваясь плоской моделью.
+func (g *Gauge) NewGaugeReplace(val float64) {
+	g.Value = val
+}
+
+type Counter struct {
+	Value int64
+}
+
+func (c *Counter) NewValueIncrement(val int64) {
+	c.Value += val
+}
+
+// Metrics NOTE: Не усложняем пример, вводя иерархическую вложенность структур.
+// Ограничиваясь плоской моделью.
 // Delta и Value объявлены через указатели,
 // что бы отличать значение "0", от не заданного значения
 // и соответственно не кодировать в структуру.
