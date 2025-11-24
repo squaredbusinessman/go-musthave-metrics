@@ -25,5 +25,6 @@ func SendMetric(client *http.Client, serverAddr string, metricType string, metri
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
+	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", metricName, metricValue)
 	return nil
 }

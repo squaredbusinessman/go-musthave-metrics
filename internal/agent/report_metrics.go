@@ -12,7 +12,7 @@ import (
 func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string) {
 	gauges, counters := store.SnapShot()
 	for name, value := range gauges {
-		if err := sendMetric(
+		if err := SendMetric(
 			client,
 			serverAddr,
 			"gauge",
@@ -23,7 +23,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 	}
 
 	for name, value := range counters {
-		if err := sendMetric(
+		if err := SendMetric(
 			client,
 			serverAddr,
 			"counter",

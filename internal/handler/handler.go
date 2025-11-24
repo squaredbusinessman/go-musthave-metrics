@@ -42,7 +42,7 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 				http.Error(w, "bad counter value", http.StatusBadRequest)
 				return
 			}
-			storage.SetCounter(name, models.Counter{Value: val})
+			storage.AddCounter(name, val)
 		default:
 			http.Error(w, "unknown metrics type", http.StatusBadRequest)
 			return

@@ -8,7 +8,7 @@ import (
 
 type Storage interface {
 	SetGauge(name string, value models.Gauge)
-	SetCounter(name string, value models.Counter)
+	AddCounter(name string, value int64)
 }
 
 type MemStorage struct {
@@ -33,11 +33,13 @@ func (ms *MemStorage) SetGauge(name string, value models.Gauge) {
 	ms.gauges[name] = value
 }
 
-// SetCounter Устанавливает значение счетчика
-func (ms *MemStorage) SetCounter(name string, value models.Counter) {
+// AddCounter Устанавливает значение счетчика
+func (ms *MemStorage) AddCounter(name string, value int64) {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
-	ms.counters[name] = value
+	counter := ms.counters[name]
+	counter.Value += value
+	ms.counters[name] = counter
 }
 
 // SnapShot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности

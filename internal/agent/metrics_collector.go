@@ -42,5 +42,5 @@ func CollectRuntimeMetrics(store *storage.MemStorage, rnd *rand.Rand) {
 	store.SetGauge("TotalAlloc", models.Gauge{Value: float64(stats.TotalAlloc)})
 	store.SetGauge("RandomValue", models.Gauge{Value: rnd.Float64()})
 
-	store.SetCounter("PollCount", models.Counter{Value: 1})
+	store.AddCounter("PollCount", 1)
 }
