@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"reflect"
-	"sync"
 	"testing"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
@@ -53,76 +51,84 @@ func TestMemStorageSnapshotCopiesMaps(t *testing.T) {
 }
 
 func TestMemStorage_GetGauge(t *testing.T) {
-	type fields struct {
-		mutex    sync.RWMutex
-		Gauge    models.Gauge
-		Counter  models.Counter
-		gauges   map[string]models.Gauge
-		counters map[string]models.Counter
+	tests := []struct {
+		name    string
+		prepare func(*MemStorage)
+		query   string
+		want    float64
+		ok      bool
+	}{
+		{
+			name: "existing gauge",
+			prepare: func(ms *MemStorage) {
+				ms.SetGauge("Alloc", models.Gauge{Value: 42})
+			},
+			query: "Alloc",
+			want:  42,
+			ok:    true,
+		},
+		{
+			name:  "missing gauge",
+			query: "unknown",
+			want:  0,
+			ok:    false,
+		},
 	}
-	type args struct {
-		name string
-	}
-	var tests []struct {
-		name   string
-		fields fields
-		args   args
-		want   models.Gauge
-		want1  bool
-	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ms := &MemStorage{
-				mutex:    tt.fields.mutex,
-				Gauge:    tt.fields.Gauge,
-				Counter:  tt.fields.Counter,
-				gauges:   tt.fields.gauges,
-				counters: tt.fields.counters,
+			ms := NewMemStorage()
+			if tt.prepare != nil {
+				tt.prepare(ms)
 			}
-			got, got1 := ms.GetGauge(tt.args.name)
-			if !reflect.DeepEqual(got, tt.want) {
+			got, ok := ms.GetGauge(tt.query)
+			if got != tt.want {
 				t.Errorf("GetGauge() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("GetGauge() got1 = %v, want %v", got1, tt.want1)
+			if ok != tt.ok {
+				t.Errorf("GetGauge() ok = %v, want %v", ok, tt.ok)
 			}
 		})
 	}
 }
 
 func TestMemStorage_GetCounter(t *testing.T) {
-	type fields struct {
-		mutex    sync.RWMutex
-		Gauge    models.Gauge
-		Counter  models.Counter
-		gauges   map[string]models.Gauge
-		counters map[string]models.Counter
+	tests := []struct {
+		name    string
+		prepare func(*MemStorage)
+		query   string
+		want    int64
+		ok      bool
+	}{
+		{
+			name: "existing counter",
+			prepare: func(ms *MemStorage) {
+				ms.AddCounter("PollCount", 5)
+			},
+			query: "PollCount",
+			want:  5,
+			ok:    true,
+		},
+		{
+			name:  "missing counter",
+			query: "unknown",
+			want:  0,
+			ok:    false,
+		},
 	}
-	type args struct {
-		name string
-	}
-	var tests []struct {
-		name   string
-		fields fields
-		args   args
-		want   int64
-		want1  bool
-	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ms := &MemStorage{
-				mutex:    tt.fields.mutex,
-				Gauge:    tt.fields.Gauge,
-				Counter:  tt.fields.Counter,
-				gauges:   tt.fields.gauges,
-				counters: tt.fields.counters,
+			ms := NewMemStorage()
+			if tt.prepare != nil {
+				tt.prepare(ms)
 			}
-			got, got1 := ms.GetCounter(tt.args.name)
+			got, ok := ms.GetCounter(tt.query)
 			if got != tt.want {
 				t.Errorf("GetCounter() got = %v, want %v", got, tt.want)
 			}
-			if got1 != tt.want1 {
-				t.Errorf("GetCounter() got1 = %v, want %v", got1, tt.want1)
+			if ok != tt.ok {
+				t.Errorf("GetCounter() ok = %v, want %v", ok, tt.ok)
 			}
 		})
 	}

@@ -19,8 +19,9 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		if ct := r.Header.Get("Content-Type"); ct != `text/plain` {
+		if ct := r.Header.Get("Content-Type"); ct != "" && ct != `text/plain` {
 			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
 		}
 
 		metricType := chi.URLParam(r, "type")
