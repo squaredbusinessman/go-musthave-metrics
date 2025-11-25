@@ -26,7 +26,7 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 		metricName := chi.URLParam(r, "name")
 		metricValue := chi.URLParam(r, "value")
 
-		if metricType != "" || metricName != "" || metricValue != "" {
+		if metricType == "" || metricName == "" || metricValue == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
@@ -64,7 +64,7 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 		metricType := chi.URLParam(r, "type")
 		metricName := chi.URLParam(r, "name")
 
-		if metricType != "" || metricName != "" {
+		if metricType == "" || metricName == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
