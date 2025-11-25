@@ -59,7 +59,7 @@ func (ms *MemStorage) GetCounter(name string) (int64, bool) {
 	defer ms.mutex.RUnlock()
 	c, ok := ms.counters[name]
 	if !ok {
-		return -1, false
+		return 0, false
 	}
 	return c.Value, ok
 }
