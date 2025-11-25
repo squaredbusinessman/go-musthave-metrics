@@ -15,10 +15,12 @@ func main() {
 	store := storage.NewMemStorage()
 	randS := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	pollTicker := time.NewTicker(cfg.PollInterval)
+	pollDuration := time.Duration(cfg.PollInterval) * time.Second
+	pollTicker := time.NewTicker(pollDuration)
 	defer pollTicker.Stop()
 
-	reportTicker := time.NewTicker(cfg.ReportInterval)
+	reportDuration := time.Duration(cfg.ReportInterval) * time.Second
+	reportTicker := time.NewTicker(reportDuration)
 	defer reportTicker.Stop()
 
 	agent.CollectRuntimeMetrics(store, randS)

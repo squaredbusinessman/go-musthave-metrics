@@ -7,16 +7,16 @@ import (
 
 type Config struct {
 	Addr           string
-	PollInterval   time.Duration
-	ReportInterval time.Duration
+	PollInterval   int
+	ReportInterval int
 }
 
 func parseConfig() Config {
 	cfg := Config{}
 
 	flag.StringVar(&cfg.Addr, "a", ":8080", "Run server address")
-	flag.DurationVar(&cfg.PollInterval, "p", 2*time.Second, "Poll interval")
-	flag.DurationVar(&cfg.ReportInterval, "r", 10*time.Second, "Report interval")
+	flag.DurationVar(&cfg.PollInterval, "p", 2, "Poll interval(seconds)")
+	flag.DurationVar(&cfg.ReportInterval, "r", 10, "Report interval(seconds)")
 
 	flag.Parse()
 
