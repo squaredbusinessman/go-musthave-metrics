@@ -16,10 +16,10 @@ func main() {
 	r := chi.NewRouter()
 
 	// пишем метрики
-	r.Post("/update/", handler.AcceptMetricsToStorage(metricsStorage))
+	r.Post("/update/{type}/{name}/{value}", handler.AcceptMetricsToStorage(metricsStorage))
 	// смотрим метрики
 	r.Get("/", handler.GetAllMetrics(metricsStorage))
-	r.Get("/value/", handler.GetMetric(metricsStorage))
+	r.Get("/value/{type}/{name}", handler.GetMetric(metricsStorage))
 
 	log.Println("Listening on port 8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {

@@ -35,7 +35,7 @@ func SendMetric(client *http.Client, serverAddr string, metricType string, metri
 
 // ReportMetrics функция отправки всех фиксируемых метрик
 func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string) {
-	gauges, counters := store.SnapShot()
+	gauges, counters := store.Snapshot()
 	for name, value := range gauges {
 		if err := SendMetric(
 			client,
