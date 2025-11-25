@@ -38,7 +38,7 @@ func TestMemStorageSnapshotCopiesMaps(t *testing.T) {
 	storage.SetGauge("RandomValue", models.Gauge{Value: 1})
 	storage.AddCounter("PollCount", 1)
 
-	gauges, counters := storage.SnapShot()
+	gauges, counters := storage.Snapshot()
 
 	storage.SetGauge("RandomValue", models.Gauge{Value: 2})
 	storage.AddCounter("PollCount", 10)

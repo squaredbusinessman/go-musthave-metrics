@@ -46,7 +46,7 @@ func TestCollectRuntimeMetricsPopulatesGauges(t *testing.T) {
 
 	CollectRuntimeMetrics(store, rnd)
 
-	gauges, counters := store.SnapShot()
+	gauges, counters := store.Snapshot()
 
 	for _, name := range gaugeNames {
 		if _, ok := gauges[name]; !ok {
@@ -73,7 +73,7 @@ func TestCollectRuntimeMetricsIncrementsPollCount(t *testing.T) {
 	CollectRuntimeMetrics(store, rnd)
 	CollectRuntimeMetrics(store, rnd)
 
-	gauges, counters := store.SnapShot()
+	gauges, counters := store.Snapshot()
 
 	if got := counters["PollCount"].Value; got != 2 {
 		t.Fatalf("PollCount = %d, want 2", got)

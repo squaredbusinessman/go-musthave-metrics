@@ -22,6 +22,13 @@ type MemStorage struct {
 	counters map[string]models.Counter
 }
 
+func NewMemStorage() *MemStorage {
+	return &MemStorage{
+		gauges:   make(map[string]models.Gauge),
+		counters: make(map[string]models.Counter),
+	}
+}
+
 // Snapshot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности
 func (ms *MemStorage) Snapshot() (map[string]models.Gauge, map[string]models.Counter) {
 	ms.mutex.RLock()
@@ -55,13 +62,6 @@ func (ms *MemStorage) GetCounter(name string) (int64, bool) {
 		return -1, false
 	}
 	return c.Value, ok
-}
-
-func NewMemStorage() *MemStorage {
-	return &MemStorage{
-		gauges:   make(map[string]models.Gauge),
-		counters: make(map[string]models.Counter),
-	}
 }
 
 // SetGauge Фиксация изменения конкретной метрики
