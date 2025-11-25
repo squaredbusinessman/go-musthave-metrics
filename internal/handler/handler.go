@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
+	"github.com/go-chi/chi/v5"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
@@ -22,28 +22,30 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 		}
 
-		parts := strings.Split(strings.Trim(r.URL.Path, `/`), `/`)
-		if len(parts) != 4 || parts[0] != `update` {
+		metricType := chi.URLParam(r, "type")
+		metricName := chi.URLParam(r, "name")
+		metricValue := chi.URLParam(r, "value")
+
+		if metricType != "" || metricName != "" || metricValue != "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		metricType, name, raw := parts[1], parts[2], parts[3]
 		switch metricType {
 		case `gauge`:
-			val, err := strconv.ParseFloat(raw, 64)
+			val, err := strconv.ParseFloat(metricValue, 64)
 			if err != nil {
 				http.Error(w, "bad gauge value", http.StatusBadRequest)
 				return
 			}
-			storage.SetGauge(name, models.Gauge{Value: val})
+			storage.SetGauge(metricName, models.Gauge{Value: val})
 		case `counter`:
-			val, err := strconv.ParseInt(raw, 10, 64)
+			val, err := strconv.ParseInt(metricValue, 10, 64)
 			if err != nil {
 				http.Error(w, "bad counter value", http.StatusBadRequest)
 				return
 			}
-			storage.AddCounter(name, val)
+			storage.AddCounter(metricName, val)
 		default:
 			http.Error(w, "unknown metrics type", http.StatusBadRequest)
 			return
@@ -59,19 +61,19 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		parts := strings.Split(strings.Trim(r.URL.Path, `/`), `/`)
-		if len(parts) != 3 || parts[0] != `value` {
+		metricType := chi.URLParam(r, "type")
+		metricName := chi.URLParam(r, "name")
+
+		if metricType != "" || metricName != "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
-
-		metricType, name := parts[1], parts[2]
 
 		w.Header().Set("Content-Type", "text/plain")
 
 		switch metricType {
 		case `gauge`:
-			g, ok := storage.GetGauge(name)
+			g, ok := storage.GetGauge(metricName)
 			if !ok {
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 				return
@@ -79,7 +81,7 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintf(w, "%f", g)
 		case `counter`:
-			c, ok := storage.GetCounter(name)
+			c, ok := storage.GetCounter(metricName)
 			if !ok {
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 				return
