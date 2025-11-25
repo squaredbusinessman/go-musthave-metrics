@@ -121,10 +121,10 @@ func GetAllMetrics(storage storage.Storage) http.HandlerFunc {
 		fmt.Fprintf(w, "<tr><th>Type</th><th>Name</th><th>Value</th></tr>")
 
 		for name, g := range gauges {
-			fmt.Fprintf(w, "<tr><td>gauge</td><td>%s</td><td>%v</td></tr>", name, g)
+			fmt.Fprintf(w, "<tr><td>gauge</td><td>%s</td><td>%v</td></tr>", name, g.Value)
 		}
 		for name, c := range counters {
-			fmt.Fprintf(w, "<tr><td>counter</td><td>%s</td><td>%d</td></tr>", name, c)
+			fmt.Fprintf(w, "<tr><td>counter</td><td>%s</td><td>%d</td></tr>", name, c.Value)
 		}
 
 		fmt.Fprintf(w, "</table></body></html>")
