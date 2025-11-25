@@ -191,7 +191,7 @@ func TestGetMetric(t *testing.T) {
 				s.gauges["temp"] = 10.5
 			},
 			wantCode: http.StatusOK,
-			wantBody: "10.500000",
+			wantBody: "10.5",
 		},
 		{
 			name:   "counter ok",
