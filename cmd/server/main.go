@@ -10,6 +10,9 @@ import (
 )
 
 func main() {
+	// обработка аргументов командной строки
+	cfg := parseConfig()
+
 	// Создаём экземпляр хранилища
 	metricsStorage := storage.NewMemStorage()
 
@@ -21,8 +24,8 @@ func main() {
 	r.Get("/", handler.GetAllMetrics(metricsStorage))
 	r.Get("/value/{type}/{name}", handler.GetMetric(metricsStorage))
 
-	log.Println("Listening on port 8080")
-	if err := http.ListenAndServe(":8080", r); err != nil {
+	log.Println("Listening on port 8080", cfg.RunAddr)
+	if err := http.ListenAndServe(cfg.RunAddr, r); err != nil {
 		log.Fatalf("could not start server: %v", err)
 	}
 }

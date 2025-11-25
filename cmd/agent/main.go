@@ -9,20 +9,16 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-const (
-	pollInterval   = 2 * time.Second
-	reportInterval = 10 * time.Second
-	serverAddr     = "localhost:8080"
-)
-
 func main() {
+	cfg := parseConfig()
+
 	store := storage.NewMemStorage()
 	randS := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	pollTicker := time.NewTicker(pollInterval)
+	pollTicker := time.NewTicker(cfg.PollInterval)
 	defer pollTicker.Stop()
 
-	reportTicker := time.NewTicker(reportInterval)
+	reportTicker := time.NewTicker(cfg.ReportInterval)
 	defer reportTicker.Stop()
 
 	agent.CollectRuntimeMetrics(store, randS)
@@ -36,7 +32,7 @@ func main() {
 		case <-pollTicker.C:
 			agent.CollectRuntimeMetrics(store, randS)
 		case <-reportTicker.C:
-			agent.ReportMetrics(client, store, serverAddr)
+			agent.ReportMetrics(client, store, cfg.Addr)
 		}
 	}
 }
