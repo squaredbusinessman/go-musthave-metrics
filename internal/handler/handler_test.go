@@ -10,7 +10,14 @@ import (
 )
 
 // --- мок хранилища ---
+type mockinterfaceStorage interface {
+	SetGauge(name string, value models.Gauge)
+	AddCounter(name string, value int64)
 
+	GetGauge(name string) (models.Gauge, bool)
+	GetCounter(name string) (int64, bool)
+	Snapshot() (map[string]models.Gauge, map[string]models.Counter)
+}
 type mockStorage struct {
 	setGaugeCalled   bool
 	addCounterCalled bool
@@ -20,6 +27,16 @@ type mockStorage struct {
 
 	counterName  string
 	counterValue int64
+}
+
+func (m *mockStorage) GetGauge(name string) (models.Gauge, bool) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mockStorage) GetCounter(name string) (int64, bool) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *mockStorage) SetGauge(name string, value models.Gauge) {
@@ -32,6 +49,11 @@ func (m *mockStorage) AddCounter(name string, value int64) {
 	m.addCounterCalled = true
 	m.counterName = name
 	m.counterValue = value
+}
+
+func (m *mockStorage) Snapshot() (map[string]models.Gauge, map[string]models.Counter) {
+	m.snapshotCalled = true
+	return nil, nil
 }
 
 // --- сами тесты ---
