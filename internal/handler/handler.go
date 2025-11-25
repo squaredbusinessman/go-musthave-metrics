@@ -88,7 +88,7 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "%f", g)
+			fmt.Fprintf(w, "%s", strconv.FormatFloat(g, 'f', -1, 64))
 		case `counter`:
 			c, ok := storage.GetCounter(metricName)
 			if !ok {
@@ -96,7 +96,7 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "%d", c)
+			fmt.Fprintf(w, "%s", strconv.FormatInt(c, 10))
 		default:
 			http.Error(w, "unknown metrics type", http.StatusBadRequest)
 			return
