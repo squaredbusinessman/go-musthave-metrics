@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
@@ -25,6 +26,13 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 		metricType := chi.URLParam(r, "type")
 		metricName := chi.URLParam(r, "name")
 		metricValue := chi.URLParam(r, "value")
+
+		if metricType == "" || metricName == "" || metricValue == "" {
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			if len(parts) == 4 && parts[0] == "update" {
+				metricType, metricName, metricValue = parts[1], parts[2], parts[3]
+			}
+		}
 
 		if metricType == "" || metricName == "" || metricValue == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
