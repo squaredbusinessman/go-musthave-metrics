@@ -11,26 +11,40 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+const (
+	metricTypeGauge   = "gauge"
+	metricTypeCounter = "counter"
+
+	urlParamType  = "type"
+	urlParamName  = "name"
+	urlParamValue = "value"
+
+	updatePathPrefix = "update"
+
+	contentTypeTextPlain = "text/plain"
+	contentTypeHTML      = "text/html; charset=utf-8"
+)
+
 // AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
 func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != `POST` {
+		if r.Method != http.MethodPost {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
 
-		if ct := r.Header.Get("Content-Type"); ct != "" && ct != `text/plain` {
+		if ct := r.Header.Get("Content-Type"); ct != "" && ct != contentTypeTextPlain {
 			http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 			return
 		}
 
-		metricType := chi.URLParam(r, "type")
-		metricName := chi.URLParam(r, "name")
-		metricValue := chi.URLParam(r, "value")
+		metricType := chi.URLParam(r, urlParamType)
+		metricName := chi.URLParam(r, urlParamName)
+		metricValue := chi.URLParam(r, urlParamValue)
 
 		if metricType == "" || metricName == "" || metricValue == "" {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-			if len(parts) == 4 && parts[0] == "update" {
+			if len(parts) == 4 && parts[0] == updatePathPrefix {
 				metricType, metricName, metricValue = parts[1], parts[2], parts[3]
 			}
 		}
@@ -41,14 +55,14 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 		}
 
 		switch metricType {
-		case `gauge`:
+		case metricTypeGauge:
 			val, err := strconv.ParseFloat(metricValue, 64)
 			if err != nil {
 				http.Error(w, "bad gauge value", http.StatusBadRequest)
 				return
 			}
 			storage.SetGauge(metricName, models.Gauge{Value: val})
-		case `counter`:
+		case metricTypeCounter:
 			val, err := strconv.ParseInt(metricValue, 10, 64)
 			if err != nil {
 				http.Error(w, "bad counter value", http.StatusBadRequest)
@@ -65,23 +79,23 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 
 func GetMetric(storage storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != `GET` {
+		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
 
-		metricType := chi.URLParam(r, "type")
-		metricName := chi.URLParam(r, "name")
+		metricType := chi.URLParam(r, urlParamType)
+		metricName := chi.URLParam(r, urlParamName)
 
 		if metricType == "" || metricName == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Type", contentTypeTextPlain)
 
 		switch metricType {
-		case `gauge`:
+		case metricTypeGauge:
 			g, ok := storage.GetGauge(metricName)
 			if !ok {
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -89,7 +103,7 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 			}
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprintf(w, "%s", strconv.FormatFloat(g, 'f', -1, 64))
-		case `counter`:
+		case metricTypeCounter:
 			c, ok := storage.GetCounter(metricName)
 			if !ok {
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
@@ -106,14 +120,14 @@ func GetMetric(storage storage.Storage) http.HandlerFunc {
 
 func GetAllMetrics(storage storage.Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != `GET` {
+		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
 
 		gauges, counters := storage.Snapshot()
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", contentTypeHTML)
 		w.WriteHeader(http.StatusOK)
 
 		fmt.Fprintf(w, "<html><body>")
