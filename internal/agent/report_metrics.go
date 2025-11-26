@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
@@ -17,9 +19,13 @@ type Metric struct {
 
 // SendMetric Функция отправки ОДНОЙ метрики
 func SendMetric(client *http.Client, serverAddr string, m Metric) error {
-	url := fmt.Sprintf("http://%s/update/%s/%s/%s", serverAddr, m.Type, m.Name, m.Value)
+	u := url.URL{
+		Scheme: "http",
+		Host:   serverAddr,
+		Path:   path.Join("update", m.Type, m.Name, m.Value),
+	}
 
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
 	if err != nil {
 		return err
 	}
