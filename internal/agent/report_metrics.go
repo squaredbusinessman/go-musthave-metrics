@@ -8,17 +8,12 @@ import (
 	"path"
 	"strconv"
 
+	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-type Metric struct {
-	Type  string
-	Name  string
-	Value string
-}
-
 // SendMetric Функция отправки ОДНОЙ метрики
-func SendMetric(client *http.Client, serverAddr string, m Metric) error {
+func SendMetric(client *http.Client, serverAddr string, m models.Metric) error {
 	u := url.URL{
 		Scheme: "http",
 		Host:   serverAddr,
@@ -52,7 +47,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 		if err := SendMetric(
 			client,
 			serverAddr,
-			Metric{
+			models.Metric{
 				Type:  "gauge",
 				Name:  name,
 				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
@@ -65,7 +60,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 		if err := SendMetric(
 			client,
 			serverAddr,
-			Metric{
+			models.Metric{
 				Type:  "counter",
 				Name:  name,
 				Value: strconv.FormatInt(value.Value, 10),

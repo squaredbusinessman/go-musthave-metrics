@@ -1,20 +1,17 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
-	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 )
 
 const (
-	metricTypeGauge   = "gauge"
-	metricTypeCounter = "counter"
-
 	urlParamType  = "type"
 	urlParamName  = "name"
 	urlParamValue = "value"
@@ -26,7 +23,7 @@ const (
 )
 
 // AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
-func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
+func AcceptMetricsToStorage(ms service.MetricsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -38,94 +35,88 @@ func AcceptMetricsToStorage(storage storage.Storage) http.HandlerFunc {
 			return
 		}
 
-		metricType := chi.URLParam(r, urlParamType)
-		metricName := chi.URLParam(r, urlParamName)
-		metricValue := chi.URLParam(r, urlParamValue)
+		m := models.Metric{
+			Type:  chi.URLParam(r, urlParamType),
+			Name:  chi.URLParam(r, urlParamName),
+			Value: chi.URLParam(r, urlParamValue),
+		}
 
-		if metricType == "" || metricName == "" || metricValue == "" {
+		if m.Type == "" || m.Name == "" || m.Value == "" {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 			if len(parts) == 4 && parts[0] == updatePathPrefix {
-				metricType, metricName, metricValue = parts[1], parts[2], parts[3]
+				m.Type, m.Name, m.Value = parts[1], parts[2], parts[3]
 			}
 		}
 
-		if metricType == "" || metricName == "" || metricValue == "" {
+		if m.Type == "" || m.Name == "" || m.Value == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		switch metricType {
-		case metricTypeGauge:
-			val, err := strconv.ParseFloat(metricValue, 64)
-			if err != nil {
-				http.Error(w, "bad gauge value", http.StatusBadRequest)
-				return
+		err := ms.UpdateMetric(r.Context(), m)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrBadMetricValue):
+				http.Error(w, "bad metric value", http.StatusBadRequest)
+			case errors.Is(err, service.ErrUnknownMetricType):
+				http.Error(w, "unknown metrics type", http.StatusBadRequest)
+			default:
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
-			storage.SetGauge(metricName, models.Gauge{Value: val})
-		case metricTypeCounter:
-			val, err := strconv.ParseInt(metricValue, 10, 64)
-			if err != nil {
-				http.Error(w, "bad counter value", http.StatusBadRequest)
-				return
-			}
-			storage.AddCounter(metricName, val)
-		default:
-			http.Error(w, "unknown metrics type", http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func GetMetric(storage storage.Storage) http.HandlerFunc {
+func GetMetric(ms service.MetricsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
 
-		metricType := chi.URLParam(r, urlParamType)
-		metricName := chi.URLParam(r, urlParamName)
+		m := models.Metric{
+			Type: chi.URLParam(r, urlParamType),
+			Name: chi.URLParam(r, urlParamName),
+		}
 
-		if metricType == "" || metricName == "" {
+		if m.Type == "" || m.Name == "" {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 
-		w.Header().Set("Content-Type", contentTypeTextPlain)
-
-		switch metricType {
-		case metricTypeGauge:
-			g, ok := storage.GetGauge(metricName)
-			if !ok {
+		value, err := ms.GetMetric(r.Context(), m)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrMetricNotFound):
 				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-				return
+			case errors.Is(err, service.ErrUnknownMetricType):
+				http.Error(w, "unknown metrics type", http.StatusBadRequest)
+			default:
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "%s", strconv.FormatFloat(g, 'f', -1, 64))
-		case metricTypeCounter:
-			c, ok := storage.GetCounter(metricName)
-			if !ok {
-				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "%s", strconv.FormatInt(c, 10))
-		default:
-			http.Error(w, "unknown metrics type", http.StatusBadRequest)
 			return
 		}
+
+		w.Header().Set("Content-Type", contentTypeTextPlain)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, value)
 	}
 }
 
-func GetAllMetrics(storage storage.Storage) http.HandlerFunc {
+func GetAllMetrics(ms service.MetricsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
 
-		gauges, counters := storage.Snapshot()
+		gauges, counters, err := ms.GetAllMetrics(r.Context())
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", contentTypeHTML)
 		w.WriteHeader(http.StatusOK)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,69 +9,60 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 )
 
-// --- мок хранилища ---
-type mockStorage struct {
-	setGaugeCalled   bool
-	addCounterCalled bool
-	snapshotCalled   bool
+type mockMetricsService struct {
+	updateCalled  bool
+	updatedMetric models.Metric
+	updateErr     error
 
-	gaugeName  string
-	gaugeValue models.Gauge
+	getMetricCalled bool
+	getMetricArg    models.Metric
+	metricValue     string
+	metricErr       error
 
-	counterName  string
-	counterValue int64
-
-	gauges   map[string]float64
-	counters map[string]int64
+	getAllCalled bool
+	gauges       map[string]models.Gauge
+	counters     map[string]models.Counter
+	allErr       error
 }
 
-func newMockStorage() *mockStorage {
-	return &mockStorage{
-		gauges:   make(map[string]float64),
-		counters: make(map[string]int64),
+func newMockMetricsService() *mockMetricsService {
+	return &mockMetricsService{
+		gauges:   make(map[string]models.Gauge),
+		counters: make(map[string]models.Counter),
 	}
 }
 
-func (m *mockStorage) GetGauge(name string) (float64, bool) {
-	val, ok := m.gauges[name]
-	return val, ok
+func (m *mockMetricsService) UpdateMetric(ctx context.Context, metric models.Metric) error {
+	m.updateCalled = true
+	m.updatedMetric = metric
+	return m.updateErr
 }
 
-func (m *mockStorage) GetCounter(name string) (int64, bool) {
-	val, ok := m.counters[name]
-	return val, ok
-}
-
-func (m *mockStorage) SetGauge(name string, value models.Gauge) {
-	m.setGaugeCalled = true
-	m.gaugeName = name
-	m.gaugeValue = value
-	m.gauges[name] = value.Value
-}
-
-func (m *mockStorage) AddCounter(name string, value int64) {
-	m.addCounterCalled = true
-	m.counterName = name
-	m.counterValue = value
-	m.counters[name] += value
-}
-
-func (m *mockStorage) Snapshot() (map[string]models.Gauge, map[string]models.Counter) {
-	m.snapshotCalled = true
-	gauges := make(map[string]models.Gauge, len(m.gauges))
-	for k, v := range m.gauges {
-		gauges[k] = models.Gauge{Value: v}
+func (m *mockMetricsService) GetMetric(ctx context.Context, metric models.Metric) (string, error) {
+	m.getMetricCalled = true
+	m.getMetricArg = metric
+	if m.metricErr != nil {
+		return "", m.metricErr
 	}
-	counters := make(map[string]models.Counter, len(m.counters))
-	for k, v := range m.counters {
-		counters[k] = models.Counter{Value: v}
-	}
-	return gauges, counters
+	return m.metricValue, nil
 }
 
-// --- сами тесты ---
+func (m *mockMetricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
+	m.getAllCalled = true
+	if m.gauges == nil {
+		m.gauges = map[string]models.Gauge{}
+	}
+	if m.counters == nil {
+		m.counters = map[string]models.Counter{}
+	}
+	if m.allErr != nil {
+		return nil, nil, m.allErr
+	}
+	return m.gauges, m.counters, nil
+}
 
 func TestAcceptMetricsToStorage(t *testing.T) {
 	type args struct {
@@ -83,18 +75,19 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 		name         string
 		args         args
 		wantCode     int
-		wantSetGauge bool
-		wantAddCount bool
+		expectUpdate bool
+		wantMetric   *models.Metric
+		setup        func(*mockMetricsService)
 	}{
 		{
 			name: "ok gauge",
 			args: args{
 				method: http.MethodPost,
 				target: "/update/gauge/temperature/42.5",
-				body:   "",
 			},
 			wantCode:     http.StatusOK,
-			wantSetGauge: true,
+			expectUpdate: true,
+			wantMetric:   &models.Metric{Type: "gauge", Name: "temperature", Value: "42.5"},
 		},
 		{
 			name: "ok counter",
@@ -103,7 +96,8 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				target: "/update/counter/requests/10",
 			},
 			wantCode:     http.StatusOK,
-			wantAddCount: true,
+			expectUpdate: true,
+			wantMetric:   &models.Metric{Type: "counter", Name: "requests", Value: "10"},
 		},
 		{
 			name: "unsupported type",
@@ -111,7 +105,12 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				method: http.MethodPost,
 				target: "/update/unknown/name/1",
 			},
-			wantCode: http.StatusBadRequest,
+			wantCode:     http.StatusBadRequest,
+			expectUpdate: true,
+			wantMetric:   &models.Metric{Type: "unknown", Name: "name", Value: "1"},
+			setup: func(m *mockMetricsService) {
+				m.updateErr = service.ErrUnknownMetricType
+			},
 		},
 		{
 			name: "bad value gauge",
@@ -119,7 +118,12 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				method: http.MethodPost,
 				target: "/update/gauge/temperature/not-a-number",
 			},
-			wantCode: http.StatusBadRequest,
+			wantCode:     http.StatusBadRequest,
+			expectUpdate: true,
+			wantMetric:   &models.Metric{Type: "gauge", Name: "temperature", Value: "not-a-number"},
+			setup: func(m *mockMetricsService) {
+				m.updateErr = service.ErrBadMetricValue
+			},
 		},
 		{
 			name: "bad value counter",
@@ -127,7 +131,12 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				method: http.MethodPost,
 				target: "/update/counter/requests/not-a-number",
 			},
-			wantCode: http.StatusBadRequest,
+			wantCode:     http.StatusBadRequest,
+			expectUpdate: true,
+			wantMetric:   &models.Metric{Type: "counter", Name: "requests", Value: "not-a-number"},
+			setup: func(m *mockMetricsService) {
+				m.updateErr = service.ErrBadMetricValue
+			},
 		},
 		{
 			name: "wrong method",
@@ -141,7 +150,7 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			name: "invalid path segments",
 			args: args{
 				method: http.MethodPost,
-				target: "/update/gauge/temperature", // 3 сегмента вместо 4
+				target: "/update/gauge/temperature",
 			},
 			wantCode: http.StatusNotFound,
 		},
@@ -149,10 +158,13 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newMockStorage()
+			svc := newMockMetricsService()
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
 
 			r := chi.NewRouter()
-			r.Post("/update/{type}/{name}/{value}", AcceptMetricsToStorage(m))
+			r.Post("/update/{type}/{name}/{value}", AcceptMetricsToStorage(svc))
 
 			req := httptest.NewRequest(tt.args.method, tt.args.target, strings.NewReader(tt.args.body))
 			req.Header.Set("Content-Type", "text/plain")
@@ -164,11 +176,14 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body = %q", w.Code, tt.wantCode, w.Body.String())
 			}
 
-			if m.setGaugeCalled != tt.wantSetGauge {
-				t.Errorf("setGaugeCalled = %v, want %v", m.setGaugeCalled, tt.wantSetGauge)
+			if svc.updateCalled != tt.expectUpdate {
+				t.Fatalf("updateCalled = %v, want %v", svc.updateCalled, tt.expectUpdate)
 			}
-			if m.addCounterCalled != tt.wantAddCount {
-				t.Errorf("addCounterCalled = %v, want %v", m.addCounterCalled, tt.wantAddCount)
+
+			if tt.wantMetric != nil && svc.updateCalled {
+				if svc.updatedMetric != *tt.wantMetric {
+					t.Fatalf("metric = %+v, want %+v", svc.updatedMetric, *tt.wantMetric)
+				}
 			}
 		})
 	}
@@ -176,38 +191,45 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 
 func TestGetMetric(t *testing.T) {
 	tests := []struct {
-		name     string
-		method   string
-		path     string
-		prepare  func(*mockStorage)
-		wantCode int
-		wantBody string
+		name         string
+		method       string
+		path         string
+		setup        func(*mockMetricsService)
+		wantCode     int
+		wantBody     string
+		expectCalled bool
 	}{
 		{
 			name:   "gauge ok",
 			method: http.MethodGet,
 			path:   "/value/gauge/temp",
-			prepare: func(s *mockStorage) {
-				s.gauges["temp"] = 10.5
+			setup: func(m *mockMetricsService) {
+				m.metricValue = "10.5"
 			},
-			wantCode: http.StatusOK,
-			wantBody: "10.5",
+			wantCode:     http.StatusOK,
+			wantBody:     "10.5",
+			expectCalled: true,
 		},
 		{
 			name:   "counter ok",
 			method: http.MethodGet,
 			path:   "/value/counter/poll",
-			prepare: func(s *mockStorage) {
-				s.counters["poll"] = 7
+			setup: func(m *mockMetricsService) {
+				m.metricValue = "7"
 			},
-			wantCode: http.StatusOK,
-			wantBody: "7",
+			wantCode:     http.StatusOK,
+			wantBody:     "7",
+			expectCalled: true,
 		},
 		{
-			name:     "not found",
-			method:   http.MethodGet,
-			path:     "/value/gauge/miss",
-			wantCode: http.StatusNotFound,
+			name:   "not found",
+			method: http.MethodGet,
+			path:   "/value/gauge/miss",
+			setup: func(m *mockMetricsService) {
+				m.metricErr = service.ErrMetricNotFound
+			},
+			wantCode:     http.StatusNotFound,
+			expectCalled: true,
 		},
 		{
 			name:     "bad method",
@@ -219,13 +241,13 @@ func TestGetMetric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := newMockStorage()
-			if tt.prepare != nil {
-				tt.prepare(store)
+			svc := newMockMetricsService()
+			if tt.setup != nil {
+				tt.setup(svc)
 			}
 
 			r := chi.NewRouter()
-			r.Get("/value/{type}/{name}", GetMetric(store))
+			r.Get("/value/{type}/{name}", GetMetric(svc))
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -241,27 +263,36 @@ func TestGetMetric(t *testing.T) {
 					t.Fatalf("body = %q, want %q", body, tt.wantBody)
 				}
 			}
+
+			if svc.getMetricCalled != tt.expectCalled {
+				t.Fatalf("getMetricCalled = %v, want %v", svc.getMetricCalled, tt.expectCalled)
+			}
 		})
 	}
 }
 
 func TestGetAllMetrics(t *testing.T) {
-	store := newMockStorage()
-	store.gauges["Alloc"] = 12.3
-	store.counters["PollCount"] = 4
+	svc := newMockMetricsService()
+	svc.gauges = map[string]models.Gauge{"Alloc": {Value: 12.3}}
+	svc.counters = map[string]models.Counter{"PollCount": {Value: 4}}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	GetAllMetrics(store).ServeHTTP(w, req)
+	GetAllMetrics(svc).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
+
 	body := w.Body.String()
 	for _, substr := range []string{"Alloc", "12.3", "PollCount", "4"} {
 		if !strings.Contains(body, substr) {
 			t.Fatalf("response body %q does not contain %q", body, substr)
 		}
+	}
+
+	if !svc.getAllCalled {
+		t.Fatalf("expected GetAllMetrics to be called")
 	}
 }

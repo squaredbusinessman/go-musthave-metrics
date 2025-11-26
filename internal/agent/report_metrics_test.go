@@ -35,7 +35,7 @@ func TestSendMetricSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), Metric{
+	err := SendMetric(client, serverAddr(ts), models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -61,7 +61,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 	defer ts.Close()
 
 	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), Metric{
+	err := SendMetric(client, serverAddr(ts), models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -80,7 +80,7 @@ func (rt errorRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 func TestSendMetricHTTPError(t *testing.T) {
 	client := &http.Client{Transport: errorRoundTripper{err: errors.New("boom")}}
 
-	err := SendMetric(client, "example.com", Metric{
+	err := SendMetric(client, "example.com", models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
