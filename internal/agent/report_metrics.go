@@ -13,7 +13,7 @@ import (
 func SendMetric(client *http.Client, serverAddr string, metricType string, metricName string, metricValue string) error {
 	url := fmt.Sprintf("http://%s/update/%s/%s/%s", serverAddr, metricType, metricName, metricValue)
 
-	req, err := http.NewRequest("POST", url, nil)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
