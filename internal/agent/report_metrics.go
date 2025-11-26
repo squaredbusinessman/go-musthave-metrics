@@ -9,9 +9,15 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+type Metric struct {
+	Type  string
+	Name  string
+	Value string
+}
+
 // SendMetric Функция отправки ОДНОЙ метрики
-func SendMetric(client *http.Client, serverAddr string, metricType string, metricName string, metricValue string) error {
-	url := fmt.Sprintf("http://%s/update/%s/%s/%s", serverAddr, metricType, metricName, metricValue)
+func SendMetric(client *http.Client, serverAddr string, m Metric) error {
+	url := fmt.Sprintf("http://%s/update/%s/%s/%s", serverAddr, m.Type, m.Name, m.Value)
 
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
@@ -29,7 +35,7 @@ func SendMetric(client *http.Client, serverAddr string, metricType string, metri
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", metricName, metricValue)
+	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", m.Name, m.Value)
 	return nil
 }
 
@@ -40,9 +46,11 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 		if err := SendMetric(
 			client,
 			serverAddr,
-			"gauge",
-			name,
-			strconv.FormatFloat(value.Value, 'f', -1, 64)); err != nil {
+			Metric{
+				Type:  "gauge",
+				Name:  name,
+				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
+			}); err != nil {
 			log.Printf("Failed to send gauge: %s", err)
 		}
 	}
@@ -51,8 +59,11 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 		if err := SendMetric(
 			client,
 			serverAddr,
-			"counter",
-			name, strconv.FormatInt(value.Value, 10)); err != nil {
+			Metric{
+				Type:  "counter",
+				Name:  name,
+				Value: strconv.FormatInt(value.Value, 10),
+			}); err != nil {
 			log.Printf("Failed to send counter: %s", err)
 		}
 	}

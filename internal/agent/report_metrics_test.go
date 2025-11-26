@@ -35,13 +35,20 @@ func TestSendMetricSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), "gauge", "Alloc", "10")
+	err := SendMetric(client, serverAddr(ts), Metric{
+		Type:  "gauge",
+		Name:  "Alloc",
+		Value: "10",
+	})
+
 	if err != nil {
 		t.Fatalf("SendMetric returned error: %v", err)
 	}
+
 	if receivedPath != "/update/gauge/Alloc/10" {
 		t.Fatalf("path = %s, want /update/gauge/Alloc/10", receivedPath)
 	}
+
 	if receivedContentType != "text/plain" {
 		t.Fatalf("content type = %s, want text/plain", receivedContentType)
 	}
@@ -54,7 +61,11 @@ func TestSendMetricBadStatus(t *testing.T) {
 	defer ts.Close()
 
 	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), "gauge", "Alloc", "10")
+	err := SendMetric(client, serverAddr(ts), Metric{
+		Type:  "gauge",
+		Name:  "Alloc",
+		Value: "10",
+	})
 	if err == nil {
 		t.Fatalf("expected error for non-200 status")
 	}
@@ -69,7 +80,11 @@ func (rt errorRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 func TestSendMetricHTTPError(t *testing.T) {
 	client := &http.Client{Transport: errorRoundTripper{err: errors.New("boom")}}
 
-	err := SendMetric(client, "example.com", "gauge", "Alloc", "10")
+	err := SendMetric(client, "example.com", Metric{
+		Type:  "gauge",
+		Name:  "Alloc",
+		Value: "10",
+	})
 	if err == nil {
 		t.Fatalf("expected error from HTTP client")
 	}
