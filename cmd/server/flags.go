@@ -16,8 +16,8 @@ func parseConfig() Config {
 
 	flag.Parse()
 
-	if envRunAddr := os.Getenv("RUN_ADDR"); envRunAddr != "" {
-		cfg.RunAddr = envRunAddr
+	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
+		cfg.RunAddr = envAddr
 	}
 
 	return cfg
