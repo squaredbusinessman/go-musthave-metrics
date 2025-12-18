@@ -34,7 +34,7 @@ func main() {
 		case <-pollTicker.C:
 			agent.CollectRuntimeMetrics(store, randS)
 		case <-reportTicker.C:
-			agent.ReportMetrics(client, store, cfg.Addr)
+			agent.ReportMetrics(client, store, cfg.Addr, cfg.ReportFormat)
 		}
 	}
 }

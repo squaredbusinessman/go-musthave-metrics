@@ -7,14 +7,58 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
+	"strings"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-// SendMetric Функция отправки ОДНОЙ метрики
+const (
+	ReportFormatPlain = "plain"
+	ReportFormatJSON  = "json"
+)
+
+func normalizeReportFormat(format string) string {
+	switch strings.ToLower(format) {
+	case ReportFormatJSON:
+		return ReportFormatJSON
+	default:
+		return ReportFormatPlain
+	}
+}
+
+// SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
 func SendMetric(client *http.Client, serverAddr string, m models.Metric) error {
+	u := url.URL{
+		Scheme: "http",
+		Host:   serverAddr,
+		Path:   path.Join("update", m.Type, m.Name, m.Value),
+	}
+
+	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", m.Name, m.Value)
+	return nil
+}
+
+// Отправка метрики в формате json
+func sendMetricJSON(client *http.Client, serverAddr string, m models.Metric) error {
 	u := url.URL{
 		Scheme: "http",
 		Host:   serverAddr,
@@ -69,10 +113,16 @@ func SendMetric(client *http.Client, serverAddr string, m models.Metric) error {
 }
 
 // ReportMetrics функция отправки всех фиксируемых метрик
-func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string) {
+func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string, reportFormat string) {
+	format := normalizeReportFormat(reportFormat)
+	sendFunc := SendMetric
+	if format == ReportFormatJSON {
+		sendFunc = sendMetricJSON
+	}
+
 	gauges, counters := store.Snapshot()
 	for name, value := range gauges {
-		if err := SendMetric(
+		if err := sendFunc(
 			client,
 			serverAddr,
 			models.Metric{
@@ -85,7 +135,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 	}
 
 	for name, value := range counters {
-		if err := SendMetric(
+		if err := sendFunc(
 			client,
 			serverAddr,
 			models.Metric{

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -111,7 +112,7 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(ts.Client(), store, serverAddr(ts))
+	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatPlain)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -152,9 +153,58 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(ts.Client(), store, serverAddr(ts))
+	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatPlain)
 
 	if callCount != 2 {
 		t.Fatalf("ReportMetrics should attempt both metrics even after error, got %d calls", callCount)
+	}
+}
+
+func TestReportMetricsJSONFormat(t *testing.T) {
+	store := storage.NewMemStorage()
+	store.SetGauge("Alloc", models.Gauge{Value: 2.5})
+	store.AddCounter("PollCount", 3)
+
+	var mu sync.Mutex
+	payloads := make(map[string]models.Metrics)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/update" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("Content-Type = %s, want application/json", ct)
+		}
+
+		var m models.Metrics
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			t.Fatalf("failed to decode json: %v", err)
+		}
+
+		mu.Lock()
+		payloads[m.ID] = m
+		mu.Unlock()
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatJSON)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(payloads) != 2 {
+		t.Fatalf("want two payloads, got %d", len(payloads))
+	}
+
+	gauge, ok := payloads["Alloc"]
+	if !ok || gauge.Value == nil || *gauge.Value != 2.5 {
+		t.Fatalf("gauge payload mismatch: %+v", gauge)
+	}
+
+	counter, ok := payloads["PollCount"]
+	if !ok || counter.Delta == nil || *counter.Delta != 3 {
+		t.Fatalf("counter payload mismatch: %+v", counter)
 	}
 }

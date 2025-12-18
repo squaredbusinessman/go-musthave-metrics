@@ -5,20 +5,25 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 )
 
 type Config struct {
 	Addr           string
 	PollInterval   int
 	ReportInterval int
+	ReportFormat   string
 }
 
 func parseConfig() Config {
-	cfg := Config{}
+	cfg := Config{ReportFormat: agent.ReportFormatPlain}
 
 	flag.StringVar(&cfg.Addr, "a", ":8080", "Run server address")
 	flag.IntVar(&cfg.PollInterval, "p", 2, "Poll interval(seconds)")
 	flag.IntVar(&cfg.ReportInterval, "r", 10, "Report interval(seconds)")
+	flag.StringVar(&cfg.ReportFormat, "f", agent.ReportFormatPlain, "Report format: plain or json")
 
 	flag.Parse()
 
@@ -42,5 +47,20 @@ func parseConfig() Config {
 		}
 	}
 
+	if envFormat := os.Getenv("REPORT_FORMAT"); envFormat != "" {
+		cfg.ReportFormat = envFormat
+	}
+
+	cfg.ReportFormat = normalizeReportFormat(cfg.ReportFormat)
+
 	return cfg
+}
+
+func normalizeReportFormat(value string) string {
+	switch strings.ToLower(value) {
+	case agent.ReportFormatJSON:
+		return agent.ReportFormatJSON
+	default:
+		return agent.ReportFormatPlain
+	}
 }
