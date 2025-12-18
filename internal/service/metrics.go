@@ -24,6 +24,7 @@ type MetricsService interface {
 	UpdateMetric(ctx context.Context, m models.Metric) error
 	UpdateMetricJSON(ctx context.Context, m models.Metrics) error
 	GetMetric(ctx context.Context, m models.Metric) (string, error)
+	GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error)
 	GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
 }
 
@@ -102,6 +103,33 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 	default:
 		return "", ErrUnknownMetricType
 	}
+}
+
+func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error) {
+	resp := models.Metrics{
+		ID:    m.ID,
+		MType: m.MType,
+	}
+	switch m.MType {
+	case MetricTypeGauge:
+		g, ok := s.store.GetGauge(m.ID)
+		if !ok {
+			return nil, ErrMetricNotFound
+		}
+		resp.Value = &g
+
+	case MetricTypeCounter:
+		c, ok := s.store.GetCounter(m.ID)
+		if !ok {
+			return nil, ErrMetricNotFound
+		}
+		resp.Delta = &c
+
+	default:
+		return nil, ErrUnknownMetricType
+	}
+
+	return &resp, nil
 }
 
 // GetAllMetrics снимок метрик зафиксированных в репозитории

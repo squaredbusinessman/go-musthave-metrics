@@ -32,10 +32,12 @@ func main() {
 	// пишем метрики
 	r.Post("/update/{type}/{name}/{value}", handler.AcceptMetricsToStorage(metricsService))
 	// новый эндпоинт для фиксации данных приходящих как JSON
-	r.Post("/update", handler.UpdateMetricJSON())
+	r.Post("/update", handler.UpdateMetricJSON(metricsService))
 	// смотрим метрики
 	r.Get("/", handler.GetAllMetrics(metricsService))
 	r.Get("/value/{type}/{name}", handler.GetMetric(metricsService))
+	// получаем JSON со значением метрики из бд
+	r.Post("/value", handler.GetMetricJSON(metricsService))
 
 	// активируем логирование запросов
 	logger.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))

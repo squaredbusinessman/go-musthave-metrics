@@ -85,7 +85,7 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 			return
 		}
 
-		logger.Log.Error("decoding request (update)")
+		logger.Log.Debug("decoding request (update)")
 		var req models.Metrics
 		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
 			logger.Log.Error("cannot decode request (update) JSON body", zap.Error(err))
@@ -144,6 +144,54 @@ func GetMetric(ms service.MetricsService) http.HandlerFunc {
 		w.Header().Set("Content-Type", contentTypeTextPlain)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, value)
+	}
+}
+
+func GetMetricJSON(ms service.MetricsService) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+
+		if ct := request.Header.Get("Content-Type"); ct != "" && ct != contentAppJSON {
+			http.Error(writer, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
+		}
+
+		logger.Log.Debug("decoding request (value)")
+		var req models.Metrics
+		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+			logger.Log.Error("cannot decode request (value) JSON body", zap.Error(err))
+			http.Error(writer, "bad JSON", http.StatusBadRequest)
+			return
+		}
+
+		defer request.Body.Close()
+
+		if req.MType == "" || req.ID == "" {
+			http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
+
+		value, err := ms.GetMetricJSON(request.Context(), req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrMetricNotFound):
+				http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			case errors.Is(err, service.ErrUnknownMetricType):
+				http.Error(writer, "unknown metrics type", http.StatusBadRequest)
+			default:
+				http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
+
+		writer.Header().Set("Content-Type", contentAppJSON)
+		writer.WriteHeader(http.StatusOK)
+		if err = json.NewEncoder(writer).Encode(value); err != nil {
+			logger.Log.Error("(value) encode response", zap.Error(err))
+		}
 	}
 }
 
