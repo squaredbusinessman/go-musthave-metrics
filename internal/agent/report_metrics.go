@@ -1,11 +1,12 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
@@ -17,14 +18,41 @@ func SendMetric(client *http.Client, serverAddr string, m models.Metric) error {
 	u := url.URL{
 		Scheme: "http",
 		Host:   serverAddr,
-		Path:   path.Join("update", m.Type, m.Name, m.Value),
+		Path:   "/update",
 	}
 
-	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+	metricJSON := models.Metrics{
+		ID:    m.Name,
+		MType: m.Type,
+	}
+
+	switch m.Type {
+	case "gauge":
+		val, err := strconv.ParseFloat(m.Value, 64)
+		if err != nil {
+			return fmt.Errorf("bad gauge value %q: %w", m.Value, err)
+		}
+		metricJSON.Value = &val
+	case "counter":
+		delta, err := strconv.ParseInt(m.Value, 10, 64)
+		if err != nil {
+			return fmt.Errorf("bad counter value %q: %w", m.Value, err)
+		}
+		metricJSON.Delta = &delta
+	default:
+		return fmt.Errorf("unknown metric type %q", m.Type)
+	}
+
+	body, err := json.Marshal(metricJSON)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "text/plain")
+
+	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
