@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -22,9 +23,20 @@ const (
 	updatePathPrefix = "update"
 
 	contentTypeTextPlain = "text/plain"
-	contentAppJSON       = "application/json; charset=utf-8"
+	contentAppJSON       = "application/json"
 	contentTypeHTML      = "text/html; charset=utf-8"
 )
+
+func isJSONContentType(value string) bool {
+	if value == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	return mediaType == contentAppJSON
+}
 
 // AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
 func AcceptMetricsToStorage(ms service.MetricsService) http.HandlerFunc {
@@ -80,20 +92,25 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 			return
 		}
 
-		if ct := request.Header.Get("Content-Type"); ct != "" && ct != contentAppJSON {
+		if ct := request.Header.Get("Content-Type"); ct != "" && !isJSONContentType(ct) {
 			http.Error(writer, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 			return
 		}
 
 		logger.Log.Debug("decoding request (update)")
 		var req models.Metrics
-		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+		defer request.Body.Close()
+		decoder := json.NewDecoder(request.Body)
+		if err := decoder.Decode(&req); err != nil {
 			logger.Log.Error("cannot decode request (update) JSON body", zap.Error(err))
 			http.Error(writer, "bad JSON", http.StatusBadRequest)
 			return
 		}
 
-		defer request.Body.Close()
+		if req.ID == "" || req.MType == "" {
+			http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			return
+		}
 
 		err := ms.UpdateMetricJSON(request.Context(), req)
 		if err != nil {
@@ -107,7 +124,19 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 			}
 			return
 		}
+
+		storedMetric, err := ms.GetMetricJSON(request.Context(), req)
+		if err != nil {
+			logger.Log.Error("failed to fetch metric after update", zap.Error(err))
+			http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		writer.Header().Set("Content-Type", contentAppJSON)
 		writer.WriteHeader(http.StatusOK)
+		if err = json.NewEncoder(writer).Encode(storedMetric); err != nil {
+			logger.Log.Error("(update) encode response", zap.Error(err))
+		}
 	}
 }
 
@@ -154,7 +183,7 @@ func GetMetricJSON(ms service.MetricsService) http.HandlerFunc {
 			return
 		}
 
-		if ct := request.Header.Get("Content-Type"); ct != "" && ct != contentAppJSON {
+		if ct := request.Header.Get("Content-Type"); ct != "" && !isJSONContentType(ct) {
 			http.Error(writer, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
 			return
 		}
