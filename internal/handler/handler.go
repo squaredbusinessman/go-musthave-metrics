@@ -22,7 +22,7 @@ const (
 	updatePathPrefix = "update"
 
 	contentTypeTextPlain = "text/plain"
-	contentAppJSON       = "application/json"
+	contentAppJSON       = "application/json; charset=utf-8"
 	contentTypeHTML      = "text/html; charset=utf-8"
 )
 
@@ -85,13 +85,15 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 			return
 		}
 
-		logger.Log.Debug("decoding request (update)")
+		logger.Log.Error("decoding request (update)")
 		var req models.Metrics
 		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
-			logger.Log.Debug("cannot decode request (update) JSON body", zap.Error(err))
+			logger.Log.Error("cannot decode request (update) JSON body", zap.Error(err))
 			http.Error(writer, "bad JSON", http.StatusBadRequest)
 			return
 		}
+
+		defer request.Body.Close()
 
 		err := ms.UpdateMetricJSON(request.Context(), req)
 		if err != nil {
