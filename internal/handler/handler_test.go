@@ -22,6 +22,15 @@ type mockMetricsService struct {
 	metricValue     string
 	metricErr       error
 
+	updateJSONCalled  bool
+	updatedMetricJSON models.Metrics
+	updateJSONErr     error
+
+	getMetricJSONCalled bool
+	getMetricJSONArg    models.Metrics
+	metricJSONResp      *models.Metrics
+	metricJSONErr       error
+
 	getAllCalled bool
 	gauges       map[string]models.Gauge
 	counters     map[string]models.Counter
@@ -41,6 +50,12 @@ func (m *mockMetricsService) UpdateMetric(ctx context.Context, metric models.Met
 	return m.updateErr
 }
 
+func (m *mockMetricsService) UpdateMetricJSON(ctx context.Context, metric models.Metrics) error {
+	m.updateJSONCalled = true
+	m.updatedMetricJSON = metric
+	return m.updateJSONErr
+}
+
 func (m *mockMetricsService) GetMetric(ctx context.Context, metric models.Metric) (string, error) {
 	m.getMetricCalled = true
 	m.getMetricArg = metric
@@ -48,6 +63,15 @@ func (m *mockMetricsService) GetMetric(ctx context.Context, metric models.Metric
 		return "", m.metricErr
 	}
 	return m.metricValue, nil
+}
+
+func (m *mockMetricsService) GetMetricJSON(ctx context.Context, metric models.Metrics) (*models.Metrics, error) {
+	m.getMetricJSONCalled = true
+	m.getMetricJSONArg = metric
+	if m.metricJSONErr != nil {
+		return nil, m.metricJSONErr
+	}
+	return m.metricJSONResp, nil
 }
 
 func (m *mockMetricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
