@@ -22,6 +22,7 @@ var (
 
 type MetricsService interface {
 	UpdateMetric(ctx context.Context, m models.Metric) error
+	UpdateMetricJSON(ctx context.Context, m models.Metrics) error
 	GetMetric(ctx context.Context, m models.Metric) (string, error)
 	GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
 }
@@ -55,6 +56,27 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 		s.store.AddCounter(m.Name, val)
 		return nil
 
+	default:
+		return ErrUnknownMetricType
+	}
+}
+
+func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics) error {
+	switch m.MType {
+	case MetricTypeGauge:
+		if m.Value == nil {
+			return ErrBadMetricValue
+		}
+		s.store.SetGauge(m.ID, models.Gauge{
+			Value: *m.Value,
+		})
+		return nil
+	case MetricTypeCounter:
+		if m.Delta == nil {
+			return ErrBadMetricValue
+		}
+		s.store.AddCounter(m.ID, *m.Delta)
+		return nil
 	default:
 		return ErrUnknownMetricType
 	}

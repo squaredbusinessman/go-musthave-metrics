@@ -31,6 +31,8 @@ func main() {
 
 	// пишем метрики
 	r.Post("/update/{type}/{name}/{value}", handler.AcceptMetricsToStorage(metricsService))
+	// новый эндпоинт для фиксации данных приходящих как JSON
+	r.Post("/update", handler.UpdateMetricJSON())
 	// смотрим метрики
 	r.Get("/", handler.GetAllMetrics(metricsService))
 	r.Get("/value/{type}/{name}", handler.GetMetric(metricsService))

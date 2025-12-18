@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
+	"go.uber.org/zap"
 )
 
 const (
@@ -19,6 +22,7 @@ const (
 	updatePathPrefix = "update"
 
 	contentTypeTextPlain = "text/plain"
+	contentAppJSON       = "application/json"
 	contentTypeHTML      = "text/html; charset=utf-8"
 )
 
@@ -66,6 +70,42 @@ func AcceptMetricsToStorage(ms service.MetricsService) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+
+		if ct := request.Header.Get("Content-Type"); ct != "" && ct != contentAppJSON {
+			http.Error(writer, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
+		}
+
+		logger.Log.Debug("decoding request (update)")
+		var req models.Metrics
+		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+			logger.Log.Debug("cannot decode request (update) JSON body", zap.Error(err))
+			http.Error(writer, "bad JSON", http.StatusBadRequest)
+			return
+		}
+
+		err := ms.UpdateMetricJSON(request.Context(), req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrBadMetricValue):
+				http.Error(writer, "bad metric value", http.StatusBadRequest)
+			case errors.Is(err, service.ErrUnknownMetricType):
+				http.Error(writer, "unknown metrics type", http.StatusBadRequest)
+			default:
+				http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
 	}
 }
 
