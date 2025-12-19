@@ -43,7 +43,7 @@ func main() {
 
 	// активируем логирование запросов
 	logger.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))
-	if err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger)); err != nil {
+	if err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware)); err != nil {
 		log.Fatalf("could not start server: %v", err)
 	}
 }

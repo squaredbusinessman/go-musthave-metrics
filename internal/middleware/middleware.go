@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"go.uber.org/zap"
 )
@@ -31,5 +33,36 @@ func RequestLogger(next http.Handler) http.Handler {
 			zap.Int("bytes", lw.Bytes),
 			zap.Duration("latency", time.Since(start)),
 		)
+	})
+}
+
+func GzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		originalWriter := writer
+
+		acceptEncoding := request.Header.Get("Accept-Encoding")
+		supportGzip := strings.Contains(acceptEncoding, "gzip")
+		if supportGzip {
+			compressWriter := agent.NewCompressWriter(writer)
+
+			originalWriter = compressWriter
+
+			defer compressWriter.Close()
+		}
+
+		contentEncoding := request.Header.Get("Content-Encoding")
+		sendGzip := strings.Contains(contentEncoding, "gzip")
+		if sendGzip {
+			compressReader, err := agent.NewCompressReader(request.Body)
+			if err != nil {
+				writer.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			request.Body = compressReader
+			defer compressReader.Close()
+		}
+
+		next.ServeHTTP(originalWriter, request)
 	})
 }
