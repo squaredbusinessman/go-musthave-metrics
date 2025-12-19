@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
@@ -28,6 +29,7 @@ func main() {
 	metricsService := service.NewMetricsService(metricsStorage)
 
 	r := chi.NewRouter()
+	r.Use(chiMiddleware.StripSlashes)
 
 	// пишем метрики
 	r.Post("/update/{type}/{name}/{value}", handler.AcceptMetricsToStorage(metricsService))
