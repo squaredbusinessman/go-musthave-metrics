@@ -29,13 +29,26 @@ type MetricsService interface {
 }
 
 type metricsService struct {
-	store repository.Storage
+	store       repository.Storage
+	afterUpdate func()
 }
 
-func NewMetricsService(store repository.Storage) MetricsService {
-	return &metricsService{
+type MetricsServiceOption func(*metricsService)
+
+func WithAfterUpdate(hook func()) MetricsServiceOption {
+	return func(ms *metricsService) {
+		ms.afterUpdate = hook
+	}
+}
+
+func NewMetricsService(store repository.Storage, opts ...MetricsServiceOption) MetricsService {
+	service := &metricsService{
 		store: store,
 	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 // UpdateMetric логика обновления метрик на сервере
@@ -47,6 +60,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 			return ErrBadMetricValue
 		}
 		s.store.SetGauge(m.Name, models.Gauge{Value: val})
+		s.triggerAfterUpdate()
 		return nil
 
 	case MetricTypeCounter:
@@ -55,6 +69,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 			return ErrBadMetricValue
 		}
 		s.store.AddCounter(m.Name, val)
+		s.triggerAfterUpdate()
 		return nil
 
 	default:
@@ -71,12 +86,14 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 		s.store.SetGauge(m.ID, models.Gauge{
 			Value: *m.Value,
 		})
+		s.triggerAfterUpdate()
 		return nil
 	case MetricTypeCounter:
 		if m.Delta == nil {
 			return ErrBadMetricValue
 		}
 		s.store.AddCounter(m.ID, *m.Delta)
+		s.triggerAfterUpdate()
 		return nil
 	default:
 		return ErrUnknownMetricType
@@ -137,4 +154,10 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 func (s *metricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	g, c := s.store.Snapshot()
 	return g, c, nil
+}
+
+func (s *metricsService) triggerAfterUpdate() {
+	if s.afterUpdate != nil {
+		s.afterUpdate()
+	}
 }

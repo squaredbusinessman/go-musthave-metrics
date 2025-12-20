@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -26,7 +27,42 @@ func main() {
 
 	// Создаём экземпляр хранилища
 	metricsStorage := storage.NewMemStorage()
-	metricsService := service.NewMetricsService(metricsStorage)
+	fileStorage := storage.NewFileStorage(cfg.FileStoragePath, metricsStorage)
+
+	if cfg.Restore {
+		if err := fileStorage.Restore(); err != nil {
+			log.Fatalf("restore metrics failure: %v", err)
+		}
+	}
+
+	var serviceOpts []service.MetricsServiceOption
+	if cfg.StoreInterval == 0 {
+		serviceOpts = append(serviceOpts, service.WithAfterUpdate(func() {
+			if err := fileStorage.Save(); err != nil {
+				logger.Log.Error("synchronous store failure", zap.Error(err))
+			}
+		}))
+	}
+	metricsService := service.NewMetricsService(metricsStorage, serviceOpts...)
+
+	var stopStore chan struct{}
+	if cfg.StoreInterval > 0 {
+		stopStore = make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(time.Duration(cfg.StoreInterval) * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := fileStorage.Save(); err != nil {
+						logger.Log.Error("periodic store failure", zap.Error(err))
+					}
+				case <-stopStore:
+					return
+				}
+			}
+		}()
+	}
 
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.StripSlashes)
@@ -43,7 +79,14 @@ func main() {
 
 	// активируем логирование запросов
 	logger.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))
-	if err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware)); err != nil {
+	err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware))
+	if stopStore != nil {
+		close(stopStore)
+		if err := fileStorage.Save(); err != nil {
+			logger.Log.Error("final store failure", zap.Error(err))
+		}
+	}
+	if err != nil {
 		log.Fatalf("could not start server: %v", err)
 	}
 }
