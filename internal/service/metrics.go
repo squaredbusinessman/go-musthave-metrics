@@ -9,11 +9,6 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-const (
-	MetricTypeGauge   = "gauge"
-	MetricTypeCounter = "counter"
-)
-
 var (
 	ErrUnknownMetricType = errors.New("unknown metric type")
 	ErrBadMetricValue    = errors.New("bad metric value")
@@ -54,7 +49,7 @@ func NewMetricsService(store repository.Storage, opts ...MetricsServiceOption) M
 // UpdateMetric логика обновления метрик на сервере
 func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) error {
 	switch m.Type {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		val, err := strconv.ParseFloat(m.Value, 64)
 		if err != nil {
 			return ErrBadMetricValue
@@ -63,7 +58,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 		s.triggerAfterUpdate()
 		return nil
 
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		val, err := strconv.ParseInt(m.Value, 10, 64)
 		if err != nil {
 			return ErrBadMetricValue
@@ -79,7 +74,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 
 func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics) error {
 	switch m.MType {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		if m.Value == nil {
 			return ErrBadMetricValue
 		}
@@ -88,7 +83,7 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 		})
 		s.triggerAfterUpdate()
 		return nil
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		if m.Delta == nil {
 			return ErrBadMetricValue
 		}
@@ -103,14 +98,14 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 // GetMetric получение одной метрики, выводим строку для удобства использования в HTTP
 func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string, error) {
 	switch m.Type {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		g, ok := s.store.GetGauge(m.Name)
 		if !ok {
 			return "", ErrMetricNotFound
 		}
 		return strconv.FormatFloat(g, 'f', -1, 64), nil
 
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		c, ok := s.store.GetCounter(m.Name)
 		if !ok {
 			return "", ErrMetricNotFound
@@ -128,14 +123,14 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 		MType: m.MType,
 	}
 	switch m.MType {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		g, ok := s.store.GetGauge(m.ID)
 		if !ok {
 			return nil, ErrMetricNotFound
 		}
 		resp.Value = &g
 
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		c, ok := s.store.GetCounter(m.ID)
 		if !ok {
 			return nil, ErrMetricNotFound

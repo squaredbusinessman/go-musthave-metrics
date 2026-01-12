@@ -111,12 +111,12 @@ func (fs *FileStorage) Restore() error {
 
 	for _, metric := range metrics {
 		switch metric.MType {
-		case "gauge":
+		case models.MetricTypeGauge:
 			if metric.Value == nil {
 				continue
 			}
 			fs.store.SetGauge(metric.ID, models.Gauge{Value: *metric.Value})
-		case "counter":
+		case models.MetricTypeCounter:
 			if metric.Delta == nil {
 				continue
 			}

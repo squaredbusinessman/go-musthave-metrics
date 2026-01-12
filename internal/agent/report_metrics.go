@@ -71,13 +71,13 @@ func sendMetricJSON(client *http.Client, serverAddr string, m models.Metric) err
 	}
 
 	switch m.Type {
-	case "gauge":
+	case models.MetricTypeGauge:
 		val, err := strconv.ParseFloat(m.Value, 64)
 		if err != nil {
 			return fmt.Errorf("bad gauge value %q: %w", m.Value, err)
 		}
 		metricJSON.Value = &val
-	case "counter":
+	case models.MetricTypeCounter:
 		delta, err := strconv.ParseInt(m.Value, 10, 64)
 		if err != nil {
 			return fmt.Errorf("bad counter value %q: %w", m.Value, err)
@@ -126,7 +126,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 			client,
 			serverAddr,
 			models.Metric{
-				Type:  "gauge",
+				Type:  models.MetricTypeGauge,
 				Name:  name,
 				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
 			}); err != nil {
@@ -139,7 +139,7 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 			client,
 			serverAddr,
 			models.Metric{
-				Type:  "counter",
+				Type:  models.MetricTypeCounter,
 				Name:  name,
 				Value: strconv.FormatInt(value.Value, 10),
 			}); err != nil {
