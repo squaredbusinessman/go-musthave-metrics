@@ -2,12 +2,13 @@ package main
 
 import (
 	"flag"
-	"log"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
+	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
+	"go.uber.org/zap"
 )
 
 type Config struct {
@@ -35,7 +36,10 @@ func parseConfig() Config {
 		if v, err := strconv.Atoi(envPollInterval); err == nil {
 			cfg.PollInterval = v
 		} else {
-			log.Printf("ignoring POLL_INTERVAL=%q: %v", envPollInterval, err)
+			myLog.Log.Warn("ignoring POLL_INTERVAL=",
+				zap.String("value", envPollInterval),
+				zap.Error(err),
+			)
 		}
 	}
 
@@ -43,7 +47,10 @@ func parseConfig() Config {
 		if v, err := strconv.Atoi(envRepInterval); err == nil {
 			cfg.ReportInterval = v
 		} else {
-			log.Printf("ignoring REPORT_INTERVAL=%q: %v", envRepInterval, err)
+			myLog.Log.Warn("ignoring REPORT_INTERVAL=",
+				zap.String("value", envRepInterval),
+				zap.Error(err),
+			)
 		}
 	}
 

@@ -8,7 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
-	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
+	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
@@ -20,10 +20,10 @@ func main() {
 	cfg := parseConfig()
 
 	// инициализация логера
-	if err := logger.Initialize(cfg.LogLevel); err != nil {
+	if err := myLog.Initialize(cfg.LogLevel); err != nil {
 		log.Fatalf("init logger failure: %v", err)
 	}
-	defer logger.Log.Sync()
+	defer myLog.Log.Sync()
 
 	// Создаём экземпляр хранилища
 	metricsStorage := storage.NewMemStorage()
@@ -39,7 +39,8 @@ func main() {
 	if cfg.StoreInterval == 0 {
 		serviceOpts = append(serviceOpts, service.WithAfterUpdate(func() {
 			if err := fileStorage.Save(); err != nil {
-				logger.Log.Error("synchronous store failure", zap.Error(err))
+
+				myLog.Log.Error("synchronous store failure", zap.Error(err))
 			}
 		}))
 	}
@@ -55,7 +56,7 @@ func main() {
 				select {
 				case <-ticker.C:
 					if err := fileStorage.Save(); err != nil {
-						logger.Log.Error("periodic store failure", zap.Error(err))
+						myLog.Log.Error("periodic store failure", zap.Error(err))
 					}
 				case <-stopStore:
 					return
@@ -78,12 +79,12 @@ func main() {
 	r.Post("/value", handler.GetMetricJSON(metricsService))
 
 	// активируем логирование запросов
-	logger.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))
+	myLog.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))
 	err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware))
 	if stopStore != nil {
 		close(stopStore)
 		if err := fileStorage.Save(); err != nil {
-			logger.Log.Error("final store failure", zap.Error(err))
+			myLog.Log.Error("final store failure", zap.Error(err))
 		}
 	}
 	if err != nil {
