@@ -1,23 +1,22 @@
 package agent
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
+	"github.com/go-resty/resty/v2"
+	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
+	"go.uber.org/zap"
 )
 
 const (
 	ReportFormatPlain = "plain"
 	ReportFormatJSON  = "json"
+	updatePath        = "/update"
 )
 
 func normalizeReportFormat(format string) string {
@@ -30,40 +29,31 @@ func normalizeReportFormat(format string) string {
 }
 
 // SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
-func SendMetric(client *http.Client, serverAddr string, m models.Metric) error {
-	u := url.URL{
-		Scheme: "http",
-		Host:   serverAddr,
-		Path:   path.Join("update", m.Type, m.Name, m.Value),
-	}
+func SendMetric(client *resty.Client, m models.Metric) error {
 
-	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+	postPath := path.Join("update", m.Type, m.Name, m.Value)
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "text/plain").
+		Post(postPath)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "text/plain")
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
+	if !resp.IsSuccess() {
+		return fmt.Errorf("bad status: %s", resp.Status())
 	}
 
-	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", m.Name, m.Value)
+	myLog.Log.
+		Info("Metric sent",
+			zap.String("metric", m.Name),
+			zap.String("value", m.Value),
+			zap.String("format", ReportFormatPlain))
 	return nil
 }
 
 // Отправка метрики в формате json
-func sendMetricJSON(client *http.Client, serverAddr string, m models.Metric) error {
-	u := url.URL{
-		Scheme: "http",
-		Host:   serverAddr,
-		Path:   "/update",
-	}
+func sendMetricJSON(client *resty.Client, m models.Metric) error {
 
 	metricJSON := models.Metrics{
 		ID:    m.Name,
@@ -87,33 +77,28 @@ func sendMetricJSON(client *http.Client, serverAddr string, m models.Metric) err
 		return fmt.Errorf("unknown metric type %q", m.Type)
 	}
 
-	body, err := json.Marshal(metricJSON)
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(metricJSON).
+		Post(updatePath)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
+	if !resp.IsSuccess() {
+		return fmt.Errorf("bad status: %s", resp.Status())
 	}
 
-	fmt.Printf("Successfully sent metric: %s\n, with value: %s\n\n", m.Name, m.Value)
+	myLog.Log.
+		Info("Metric sent",
+			zap.String("metric", m.Name),
+			zap.String("value", m.Value),
+			zap.String("format", ReportFormatJSON))
 	return nil
 }
 
 // ReportMetrics функция отправки всех фиксируемых метрик
-func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr string, reportFormat string) {
+func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string) {
 	format := normalizeReportFormat(reportFormat)
 	sendFunc := SendMetric
 	if format == ReportFormatJSON {
@@ -124,26 +109,24 @@ func ReportMetrics(client *http.Client, store *storage.MemStorage, serverAddr st
 	for name, value := range gauges {
 		if err := sendFunc(
 			client,
-			serverAddr,
 			models.Metric{
 				Type:  models.MetricTypeGauge,
 				Name:  name,
 				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
 			}); err != nil {
-			log.Printf("Failed to send gauge: %s", err)
+			myLog.Log.Warn("Failed to send gauge", zap.Error(err))
 		}
 	}
 
 	for name, value := range counters {
 		if err := sendFunc(
 			client,
-			serverAddr,
 			models.Metric{
 				Type:  models.MetricTypeCounter,
 				Name:  name,
 				Value: strconv.FormatInt(value.Value, 10),
 			}); err != nil {
-			log.Printf("Failed to send counter: %s", err)
+			myLog.Log.Warn("Failed to send counter", zap.Error(err))
 		}
 	}
 }

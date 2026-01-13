@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 	"math/rand"
-	"net/http"
 	"time"
 
+	resty "github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
@@ -33,9 +33,9 @@ func main() {
 
 	agent.CollectRuntimeMetrics(store, randS)
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
+	client := resty.New().
+		SetBaseURL("http://" + cfg.Addr).
+		SetTimeout(5 * time.Second)
 
 	for {
 		select {
