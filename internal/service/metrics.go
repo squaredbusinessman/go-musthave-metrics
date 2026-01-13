@@ -9,11 +9,6 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-const (
-	MetricTypeGauge   = "gauge"
-	MetricTypeCounter = "counter"
-)
-
 var (
 	ErrUnknownMetricType = errors.New("unknown metric type")
 	ErrBadMetricValue    = errors.New("bad metric value")
@@ -22,39 +17,79 @@ var (
 
 type MetricsService interface {
 	UpdateMetric(ctx context.Context, m models.Metric) error
+	UpdateMetricJSON(ctx context.Context, m models.Metrics) error
 	GetMetric(ctx context.Context, m models.Metric) (string, error)
+	GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error)
 	GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
 }
 
 type metricsService struct {
-	store repository.Storage
+	store       repository.Storage
+	afterUpdate func()
 }
 
-func NewMetricsService(store repository.Storage) MetricsService {
-	return &metricsService{
+type MetricsServiceOption func(*metricsService)
+
+func WithAfterUpdate(hook func()) MetricsServiceOption {
+	return func(ms *metricsService) {
+		ms.afterUpdate = hook
+	}
+}
+
+func NewMetricsService(store repository.Storage, opts ...MetricsServiceOption) MetricsService {
+	service := &metricsService{
 		store: store,
 	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 // UpdateMetric логика обновления метрик на сервере
 func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) error {
 	switch m.Type {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		val, err := strconv.ParseFloat(m.Value, 64)
 		if err != nil {
 			return ErrBadMetricValue
 		}
 		s.store.SetGauge(m.Name, models.Gauge{Value: val})
+		s.triggerAfterUpdate()
 		return nil
 
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		val, err := strconv.ParseInt(m.Value, 10, 64)
 		if err != nil {
 			return ErrBadMetricValue
 		}
 		s.store.AddCounter(m.Name, val)
+		s.triggerAfterUpdate()
 		return nil
 
+	default:
+		return ErrUnknownMetricType
+	}
+}
+
+func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics) error {
+	switch m.MType {
+	case models.MetricTypeGauge:
+		if m.Value == nil {
+			return ErrBadMetricValue
+		}
+		s.store.SetGauge(m.ID, models.Gauge{
+			Value: *m.Value,
+		})
+		s.triggerAfterUpdate()
+		return nil
+	case models.MetricTypeCounter:
+		if m.Delta == nil {
+			return ErrBadMetricValue
+		}
+		s.store.AddCounter(m.ID, *m.Delta)
+		s.triggerAfterUpdate()
+		return nil
 	default:
 		return ErrUnknownMetricType
 	}
@@ -63,14 +98,14 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 // GetMetric получение одной метрики, выводим строку для удобства использования в HTTP
 func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string, error) {
 	switch m.Type {
-	case MetricTypeGauge:
+	case models.MetricTypeGauge:
 		g, ok := s.store.GetGauge(m.Name)
 		if !ok {
 			return "", ErrMetricNotFound
 		}
 		return strconv.FormatFloat(g, 'f', -1, 64), nil
 
-	case MetricTypeCounter:
+	case models.MetricTypeCounter:
 		c, ok := s.store.GetCounter(m.Name)
 		if !ok {
 			return "", ErrMetricNotFound
@@ -82,9 +117,42 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 	}
 }
 
+func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error) {
+	resp := models.Metrics{
+		ID:    m.ID,
+		MType: m.MType,
+	}
+	switch m.MType {
+	case models.MetricTypeGauge:
+		g, ok := s.store.GetGauge(m.ID)
+		if !ok {
+			return nil, ErrMetricNotFound
+		}
+		resp.Value = &g
+
+	case models.MetricTypeCounter:
+		c, ok := s.store.GetCounter(m.ID)
+		if !ok {
+			return nil, ErrMetricNotFound
+		}
+		resp.Delta = &c
+
+	default:
+		return nil, ErrUnknownMetricType
+	}
+
+	return &resp, nil
+}
+
 // GetAllMetrics снимок метрик зафиксированных в репозитории
 // TODO: добавить сортировку, фильтрацию
 func (s *metricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	g, c := s.store.Snapshot()
 	return g, c, nil
+}
+
+func (s *metricsService) triggerAfterUpdate() {
+	if s.afterUpdate != nil {
+		s.afterUpdate()
+	}
 }

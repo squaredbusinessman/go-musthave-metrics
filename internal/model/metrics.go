@@ -1,5 +1,10 @@
 package models
 
+const (
+	MetricTypeGauge   = "gauge"
+	MetricTypeCounter = "counter"
+)
+
 type Gauge struct {
 	Value float64
 }
