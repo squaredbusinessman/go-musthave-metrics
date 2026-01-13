@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	resty "github.com/go-resty/resty/v2"
+	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
@@ -42,7 +42,7 @@ func main() {
 		case <-pollTicker.C:
 			agent.CollectRuntimeMetrics(store, randS)
 		case <-reportTicker.C:
-			agent.ReportMetrics(client, store, cfg.Addr, cfg.ReportFormat)
+			agent.ReportMetrics(client, store, cfg.ReportFormat)
 		}
 	}
 }

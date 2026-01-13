@@ -5,22 +5,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/go-resty/resty/v2"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-// конвертация httptest.Server.URL в host:port для SendMetric
-func serverAddr(ts *httptest.Server) string {
-	parsed, err := url.Parse(ts.URL)
-	if err != nil {
-		return ts.URL
-	}
-	return parsed.Host
+func newTestClient(ts *httptest.Server) *resty.Client {
+	return resty.New().SetBaseURL(ts.URL)
 }
 
 func TestSendMetricSuccess(t *testing.T) {
@@ -35,8 +30,8 @@ func TestSendMetricSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), models.Metric{
+	client := newTestClient(ts)
+	err := SendMetric(client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -61,8 +56,8 @@ func TestSendMetricBadStatus(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := ts.Client()
-	err := SendMetric(client, serverAddr(ts), models.Metric{
+	client := newTestClient(ts)
+	err := SendMetric(client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -79,9 +74,11 @@ func (rt errorRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 func TestSendMetricHTTPError(t *testing.T) {
-	client := &http.Client{Transport: errorRoundTripper{err: errors.New("boom")}}
+	client := resty.New().
+		SetBaseURL("http://example.com").
+		SetTransport(errorRoundTripper{err: errors.New("boom")})
 
-	err := SendMetric(client, "example.com", models.Metric{
+	err := SendMetric(client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -112,7 +109,7 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatPlain)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -153,7 +150,7 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatPlain)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
 
 	if callCount != 2 {
 		t.Fatalf("ReportMetrics should attempt both metrics even after error, got %d calls", callCount)
@@ -189,7 +186,7 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(ts.Client(), store, serverAddr(ts), ReportFormatJSON)
+	ReportMetrics(newTestClient(ts), store, ReportFormatJSON)
 
 	mu.Lock()
 	defer mu.Unlock()
