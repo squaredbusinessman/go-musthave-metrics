@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
@@ -28,6 +30,20 @@ func main() {
 	// Создаём экземпляр хранилища
 	metricsStorage := storage.NewMemStorage()
 	fileStorage := storage.NewFileStorage(cfg.FileStoragePath, metricsStorage)
+
+	// Подключаемся к postgreSQL через драйвер pgx,
+	// сразу используем пул в будущем эффективнее переиспользовать соединения
+	// и распределять ресурсы
+	var dbPool *pgxpool.Pool
+	if cfg.DatabaseDSN != "" {
+		pool, err := pgxpool.New(context.Background(), cfg.DatabaseDSN)
+		if err != nil {
+			myLog.Log.Error("db pool init failure", zap.Error(err))
+		} else {
+			dbPool = pool
+			defer dbPool.Close()
+		}
+	}
 
 	if cfg.Restore {
 		if err := fileStorage.Restore(); err != nil {
@@ -77,6 +93,8 @@ func main() {
 	r.Get("/value/{type}/{name}", handler.GetMetric(metricsService))
 	// получаем JSON со значением метрики из бд
 	r.Post("/value", handler.GetMetricJSON(metricsService))
+	// проверка соединения с БД
+	r.Get("/ping", handler.Ping(dbPool))
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))

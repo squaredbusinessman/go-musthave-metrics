@@ -13,6 +13,7 @@ type Config struct {
 	StoreInterval   int
 	FileStoragePath string
 	Restore         bool
+	DatabaseDSN     string
 }
 
 func parseConfig() Config {
@@ -27,6 +28,7 @@ func parseConfig() Config {
 	flag.IntVar(&cfg.StoreInterval, "i", cfg.StoreInterval, "store interval in seconds (0 for sync)")
 	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "file storage path")
 	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "restore metrics from file on startup")
+	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
 
 	flag.Parse()
 
@@ -56,6 +58,10 @@ func parseConfig() Config {
 		} else {
 			log.Printf("ignoring RESTORE=%q: %v", envRestore, err)
 		}
+	}
+
+	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
+		cfg.DatabaseDSN = envDSN
 	}
 
 	if cfg.StoreInterval < 0 {
