@@ -2,13 +2,13 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"mime"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/customErr"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
@@ -71,14 +71,7 @@ func AcceptMetricsToStorage(ms service.MetricsService) http.HandlerFunc {
 
 		err := ms.UpdateMetric(r.Context(), m)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrBadMetricValue):
-				http.Error(w, "bad metric value", http.StatusBadRequest)
-			case errors.Is(err, service.ErrUnknownMetricType):
-				http.Error(w, "unknown metrics type", http.StatusBadRequest)
-			default:
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			customErr.WriteServiceError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -114,14 +107,7 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 
 		err := ms.UpdateMetricJSON(request.Context(), req)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrBadMetricValue):
-				http.Error(writer, "bad metric value", http.StatusBadRequest)
-			case errors.Is(err, service.ErrUnknownMetricType):
-				http.Error(writer, "unknown metrics type", http.StatusBadRequest)
-			default:
-				http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			customErr.WriteServiceError(writer, err)
 			return
 		}
 
@@ -159,14 +145,7 @@ func GetMetric(ms service.MetricsService) http.HandlerFunc {
 
 		value, err := ms.GetMetric(r.Context(), m)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrMetricNotFound):
-				http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			case errors.Is(err, service.ErrUnknownMetricType):
-				http.Error(w, "unknown metrics type", http.StatusBadRequest)
-			default:
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			customErr.WriteServiceError(w, err)
 			return
 		}
 
@@ -205,14 +184,7 @@ func GetMetricJSON(ms service.MetricsService) http.HandlerFunc {
 
 		value, err := ms.GetMetricJSON(request.Context(), req)
 		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrMetricNotFound):
-				http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-			case errors.Is(err, service.ErrUnknownMetricType):
-				http.Error(writer, "unknown metrics type", http.StatusBadRequest)
-			default:
-				http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
+			customErr.WriteServiceError(writer, err)
 			return
 		}
 
