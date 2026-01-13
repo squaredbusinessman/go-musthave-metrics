@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/squaredbusinessman/go-musthave-metrics/internal/customErr"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
@@ -71,7 +71,7 @@ func AcceptMetricsToStorage(ms service.MetricsService) http.HandlerFunc {
 
 		err := ms.UpdateMetric(r.Context(), m)
 		if err != nil {
-			customErr.WriteServiceError(w, err)
+			apperr.WriteServiceError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -107,7 +107,7 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 
 		err := ms.UpdateMetricJSON(request.Context(), req)
 		if err != nil {
-			customErr.WriteServiceError(writer, err)
+			apperr.WriteServiceError(writer, err)
 			return
 		}
 
@@ -145,7 +145,7 @@ func GetMetric(ms service.MetricsService) http.HandlerFunc {
 
 		value, err := ms.GetMetric(r.Context(), m)
 		if err != nil {
-			customErr.WriteServiceError(w, err)
+			apperr.WriteServiceError(w, err)
 			return
 		}
 
@@ -184,7 +184,7 @@ func GetMetricJSON(ms service.MetricsService) http.HandlerFunc {
 
 		value, err := ms.GetMetricJSON(request.Context(), req)
 		if err != nil {
-			customErr.WriteServiceError(writer, err)
+			apperr.WriteServiceError(writer, err)
 			return
 		}
 
