@@ -8,19 +8,21 @@ import (
 )
 
 type Config struct {
-	RunAddr         string
-	LogLevel        string
-	StoreInterval   int
-	FileStoragePath string
-	Restore         bool
-	DatabaseDSN     string
+	RunAddr            string
+	LogLevel           string
+	StoreInterval      int
+	FileStorageEnabled bool
+	FileStoragePath    string
+	Restore            bool
+	DatabaseDSN        string
 }
 
 func parseConfig() Config {
 	cfg := Config{
-		StoreInterval:   300,
-		FileStoragePath: "/tmp/devops-metrics-db.json",
-		Restore:         true,
+		StoreInterval:      300,
+		FileStorageEnabled: false,
+		FileStoragePath:    "/tmp/devops-metrics-db.json",
+		Restore:            true,
 	}
 
 	flag.StringVar(&cfg.RunAddr, "a", ":8080", "Run server address")
@@ -31,6 +33,17 @@ func parseConfig() Config {
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
 
 	flag.Parse()
+
+	// Не понимаю, насколько это кринж.
+	// Суть в том чтобы чекнуть, был ли флаг -f передан явно.
+	fileFlagSet := false
+
+	flag.CommandLine.Visit(
+		func(f *flag.Flag) {
+			if f.Name == "f" {
+				fileFlagSet = true
+			}
+		})
 
 	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
 		cfg.RunAddr = envAddr
@@ -48,8 +61,12 @@ func parseConfig() Config {
 		}
 	}
 
+	// тут включаем файл только если явно задан env или флаг -f
 	if envFilePath := os.Getenv("FILE_STORAGE_PATH"); envFilePath != "" {
 		cfg.FileStoragePath = envFilePath
+		cfg.FileStorageEnabled = true
+	} else if fileFlagSet && cfg.FileStoragePath != "" {
+		cfg.FileStorageEnabled = true
 	}
 
 	if envRestore := os.Getenv("RESTORE"); envRestore != "" {

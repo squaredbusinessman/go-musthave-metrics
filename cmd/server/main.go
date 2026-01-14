@@ -12,7 +12,7 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
-	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 	"go.uber.org/zap"
 )
@@ -27,43 +27,53 @@ func main() {
 	}
 	defer myLog.Log.Sync()
 
-	// Создаём экземпляр хранилища
-	metricsStorage := storage.NewMemStorage()
-	fileStorage := storage.NewFileStorage(cfg.FileStoragePath, metricsStorage)
+	var (
+		store       repository.Storage
+		fileStorage *repository.FileStorage
+		dbPool      *pgxpool.Pool
+	)
 
+	switch {
 	// Подключаемся к postgreSQL через драйвер pgx,
 	// сразу используем пул в будущем эффективнее переиспользовать соединения
 	// и распределять ресурсы
-	var dbPool *pgxpool.Pool
-	if cfg.DatabaseDSN != "" {
+	case cfg.DatabaseDSN != "":
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseDSN)
 		if err != nil {
-			myLog.Log.Error("db pool init failure", zap.Error(err))
-		} else {
-			dbPool = pool
-			defer dbPool.Close()
+			log.Fatalf("db pool init failure: %v", err)
 		}
-	}
+		dbPool = pool
+		defer dbPool.Close()
 
-	if cfg.Restore {
-		if err := fileStorage.Restore(); err != nil {
-			log.Fatalf("restore metrics failure: %v", err)
+		store = repository.NewDBStorage(dbPool)
+
+	case cfg.FileStorageEnabled:
+		store = repository.NewMemStorage()
+		fileStorage = repository.NewFileStorage(cfg.FileStoragePath, store)
+
+		if cfg.Restore {
+			if err := fileStorage.Restore(); err != nil {
+				log.Fatalf("restore metrics failure: %v", err)
+			}
 		}
+
+	default:
+		store = repository.NewMemStorage()
 	}
 
 	var serviceOpts []service.MetricsServiceOption
-	if cfg.StoreInterval == 0 {
+	if fileStorage != nil && cfg.StoreInterval == 0 {
 		serviceOpts = append(serviceOpts, service.WithAfterUpdate(func() {
 			if err := fileStorage.Save(); err != nil {
-
 				myLog.Log.Error("synchronous store failure", zap.Error(err))
 			}
 		}))
 	}
-	metricsService := service.NewMetricsService(metricsStorage, serviceOpts...)
+
+	metricsService := service.NewMetricsService(store, serviceOpts...)
 
 	var stopStore chan struct{}
-	if cfg.StoreInterval > 0 {
+	if fileStorage != nil && cfg.StoreInterval > 0 {
 		stopStore = make(chan struct{})
 		go func() {
 			ticker := time.NewTicker(time.Duration(cfg.StoreInterval) * time.Second)
