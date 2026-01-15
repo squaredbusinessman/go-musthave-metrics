@@ -1,17 +1,21 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"sync"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
+var ErrNotFound = errors.New("metric not found")
+
 type Storage interface {
-	SetGauge(name string, value models.Gauge)
-	AddCounter(name string, value int64)
-	GetGauge(name string) (float64, bool)
-	GetCounter(name string) (int64, bool)
-	Snapshot() (map[string]models.Gauge, map[string]models.Counter)
+	SetGauge(ctx context.Context, name string, value models.Gauge)
+	AddCounter(ctx context.Context, name string, value int64)
+	GetGauge(ctx context.Context, name string) (float64, bool)
+	GetCounter(ctx context.Context, name string) (int64, bool)
+	Snapshot(ctx context.Context, ) (map[string]models.Gauge, map[string]models.Counter)
 }
 
 type MemStorage struct {
@@ -30,7 +34,7 @@ func NewMemStorage() *MemStorage {
 }
 
 // Snapshot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности
-func (ms *MemStorage) Snapshot() (map[string]models.Gauge, map[string]models.Counter) {
+func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
 
@@ -44,38 +48,40 @@ func (ms *MemStorage) Snapshot() (map[string]models.Gauge, map[string]models.Cou
 		countersCopy[k] = v
 	}
 
-	return gaugesCopy, countersCopy
+	return gaugesCopy, countersCopy, nil
 }
 
-func (ms *MemStorage) GetGauge(name string) (float64, bool) {
+func (ms *MemStorage) GetGauge(ctx context.Context, name string) (float64, bool, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
 	g, ok := ms.gauges[name]
-	return g.Value, ok
+	return g.Value, ok, nil
 }
 
-func (ms *MemStorage) GetCounter(name string) (int64, bool) {
+func (ms *MemStorage) GetCounter(ctx context.Context, name string) (int64, bool, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
 	c, ok := ms.counters[name]
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
-	return c.Value, ok
+	return c.Value, ok, nil
 }
 
 // SetGauge Фиксация изменения конкретной метрики
-func (ms *MemStorage) SetGauge(name string, value models.Gauge) {
+func (ms *MemStorage) SetGauge(ctx context.Context, name string, value models.Gauge) error {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
 	ms.gauges[name] = value
+	return nil
 }
 
 // AddCounter Устанавливает значение счетчика
-func (ms *MemStorage) AddCounter(name string, value int64) {
+func (ms *MemStorage) AddCounter(ctx context.Context, name string, value int64) error {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
 	counter := ms.counters[name]
 	counter.Value += value
 	ms.counters[name] = counter
+	return nil
 }
