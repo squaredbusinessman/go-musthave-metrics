@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -90,8 +91,13 @@ func TestSendMetricHTTPError(t *testing.T) {
 
 func TestReportMetricsSendsAllValues(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 1})
-	store.AddCounter("PollCount", 5)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 1}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 5); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var mu sync.Mutex
 	requests := make(map[string]int)
@@ -132,8 +138,13 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 
 func TestReportMetricsContinuesAfterError(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 1})
-	store.AddCounter("PollCount", 5)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 1}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 5); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var callCount int
 
@@ -159,8 +170,13 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 
 func TestReportMetricsJSONFormat(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 2.5})
-	store.AddCounter("PollCount", 3)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 2.5}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 3); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var mu sync.Mutex
 	payloads := make(map[string]models.Metrics)

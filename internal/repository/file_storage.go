@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -28,7 +29,11 @@ func (fs *FileStorage) Save() error {
 		return ErrFileStoragePathEmpty
 	}
 
-	gauges, counters := fs.store.Snapshot()
+	gauges, counters, err := fs.store.Snapshot(context.Background())
+	if err != nil {
+		return err
+	}
+
 	metrics := make([]models.Metrics, 0, len(gauges)+len(counters))
 	for id, gauge := range gauges {
 		value := gauge.Value
@@ -89,6 +94,8 @@ func (fs *FileStorage) Save() error {
 }
 
 func (fs *FileStorage) Restore() error {
+	ctx := context.Background()
+
 	if fs.path == "" {
 		return ErrFileStoragePathEmpty
 	}
@@ -115,12 +122,12 @@ func (fs *FileStorage) Restore() error {
 			if metric.Value == nil {
 				continue
 			}
-			fs.store.SetGauge(metric.ID, models.Gauge{Value: *metric.Value})
+			_ = fs.store.SetGauge(ctx, metric.ID, models.Gauge{Value: *metric.Value})
 		case models.MetricTypeCounter:
 			if metric.Delta == nil {
 				continue
 			}
-			fs.store.AddCounter(metric.ID, *metric.Delta)
+			_ = fs.store.AddCounter(ctx, metric.ID, *metric.Delta)
 		}
 	}
 

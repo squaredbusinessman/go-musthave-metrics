@@ -11,11 +11,11 @@ import (
 var ErrNotFound = errors.New("metric not found")
 
 type Storage interface {
-	SetGauge(ctx context.Context, name string, value models.Gauge)
-	AddCounter(ctx context.Context, name string, value int64)
-	GetGauge(ctx context.Context, name string) (float64, bool)
-	GetCounter(ctx context.Context, name string) (int64, bool)
-	Snapshot(ctx context.Context, ) (map[string]models.Gauge, map[string]models.Counter)
+	SetGauge(ctx context.Context, name string, value models.Gauge) error
+	AddCounter(ctx context.Context, name string, value int64) error
+	GetGauge(ctx context.Context, name string) (float64, error)
+	GetCounter(ctx context.Context, name string) (int64, error)
+	Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
 }
 
 type MemStorage struct {
@@ -31,41 +31,6 @@ func NewMemStorage() *MemStorage {
 		gauges:   make(map[string]models.Gauge),
 		counters: make(map[string]models.Counter),
 	}
-}
-
-// Snapshot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности
-func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
-	ms.mutex.RLock()
-	defer ms.mutex.RUnlock()
-
-	gaugesCopy := make(map[string]models.Gauge, len(ms.gauges))
-	for k, v := range ms.gauges {
-		gaugesCopy[k] = v
-	}
-
-	countersCopy := make(map[string]models.Counter, len(ms.counters))
-	for k, v := range ms.counters {
-		countersCopy[k] = v
-	}
-
-	return gaugesCopy, countersCopy, nil
-}
-
-func (ms *MemStorage) GetGauge(ctx context.Context, name string) (float64, bool, error) {
-	ms.mutex.RLock()
-	defer ms.mutex.RUnlock()
-	g, ok := ms.gauges[name]
-	return g.Value, ok, nil
-}
-
-func (ms *MemStorage) GetCounter(ctx context.Context, name string) (int64, bool, error) {
-	ms.mutex.RLock()
-	defer ms.mutex.RUnlock()
-	c, ok := ms.counters[name]
-	if !ok {
-		return 0, false, nil
-	}
-	return c.Value, ok, nil
 }
 
 // SetGauge Фиксация изменения конкретной метрики
@@ -84,4 +49,42 @@ func (ms *MemStorage) AddCounter(ctx context.Context, name string, value int64) 
 	counter.Value += value
 	ms.counters[name] = counter
 	return nil
+}
+
+func (ms *MemStorage) GetGauge(ctx context.Context, name string) (float64, error) {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+	g, ok := ms.gauges[name]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	return g.Value, nil
+}
+
+func (ms *MemStorage) GetCounter(ctx context.Context, name string) (int64, error) {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+	c, ok := ms.counters[name]
+	if !ok {
+		return 0, ErrNotFound
+	}
+	return c.Value, nil
+}
+
+// Snapshot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности
+func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+
+	gaugesCopy := make(map[string]models.Gauge, len(ms.gauges))
+	for k, v := range ms.gauges {
+		gaugesCopy[k] = v
+	}
+
+	countersCopy := make(map[string]models.Counter, len(ms.counters))
+	for k, v := range ms.counters {
+		countersCopy[k] = v
+	}
+
+	return gaugesCopy, countersCopy, nil
 }

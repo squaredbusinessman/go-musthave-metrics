@@ -54,7 +54,11 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 		if err != nil {
 			return ErrBadMetricValue
 		}
-		s.store.SetGauge(m.Name, models.Gauge{Value: val})
+
+		if err = s.store.SetGauge(ctx, m.Name, models.Gauge{Value: val}); err != nil {
+			return err
+		}
+
 		s.triggerAfterUpdate()
 		return nil
 
@@ -63,7 +67,11 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 		if err != nil {
 			return ErrBadMetricValue
 		}
-		s.store.AddCounter(m.Name, val)
+
+		if err = s.store.AddCounter(ctx, m.Name, val); err != nil {
+			return err
+		}
+
 		s.triggerAfterUpdate()
 		return nil
 
@@ -78,16 +86,19 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 		if m.Value == nil {
 			return ErrBadMetricValue
 		}
-		s.store.SetGauge(m.ID, models.Gauge{
-			Value: *m.Value,
-		})
+
+		if err := s.store.SetGauge(ctx, m.ID, models.Gauge{Value: *m.Value}); err != nil {
+			return err
+		}
 		s.triggerAfterUpdate()
 		return nil
 	case models.MetricTypeCounter:
 		if m.Delta == nil {
 			return ErrBadMetricValue
 		}
-		s.store.AddCounter(m.ID, *m.Delta)
+		if err := s.store.AddCounter(ctx, m.ID, *m.Delta); err != nil {
+			return err
+		}
 		s.triggerAfterUpdate()
 		return nil
 	default:
@@ -99,19 +110,24 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string, error) {
 	switch m.Type {
 	case models.MetricTypeGauge:
-		g, ok := s.store.GetGauge(m.Name)
-		if !ok {
-			return "", ErrMetricNotFound
+		g, err := s.store.GetGauge(ctx, m.Name)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return "", ErrMetricNotFound
+			}
+			return "", err
 		}
 		return strconv.FormatFloat(g, 'f', -1, 64), nil
 
 	case models.MetricTypeCounter:
-		c, ok := s.store.GetCounter(m.Name)
-		if !ok {
-			return "", ErrMetricNotFound
+		c, err := s.store.GetCounter(ctx, m.Name)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return "", ErrMetricNotFound
+			}
+			return "", err
 		}
 		return strconv.FormatInt(c, 10), nil
-
 	default:
 		return "", ErrUnknownMetricType
 	}
@@ -124,16 +140,22 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 	}
 	switch m.MType {
 	case models.MetricTypeGauge:
-		g, ok := s.store.GetGauge(m.ID)
-		if !ok {
-			return nil, ErrMetricNotFound
+		g, err := s.store.GetGauge(ctx, m.ID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrMetricNotFound
+			}
+			return nil, err
 		}
 		resp.Value = &g
 
 	case models.MetricTypeCounter:
-		c, ok := s.store.GetCounter(m.ID)
-		if !ok {
-			return nil, ErrMetricNotFound
+		c, err := s.store.GetCounter(ctx, m.ID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, ErrMetricNotFound
+			}
+			return nil, err
 		}
 		resp.Delta = &c
 
@@ -145,9 +167,11 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 }
 
 // GetAllMetrics снимок метрик зафиксированных в репозитории
-// TODO: добавить сортировку, фильтрацию
 func (s *metricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
-	g, c := s.store.Snapshot()
+	g, c, err := s.store.Snapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	return g, c, nil
 }
 
@@ -156,3 +180,5 @@ func (s *metricsService) triggerAfterUpdate() {
 		s.afterUpdate()
 	}
 }
+
+// TODO: добавить сортировку, фильтрацию

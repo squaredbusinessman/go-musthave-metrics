@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"strconv"
@@ -105,7 +106,11 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 		sendFunc = sendMetricJSON
 	}
 
-	gauges, counters := store.Snapshot()
+	gauges, counters, err := store.Snapshot(context.Background())
+	if err != nil {
+		myLog.Log.Warn("Failed to snapshot metrics", zap.Error(err))
+		return
+	}
 	for name, value := range gauges {
 		if err := sendFunc(
 			client,
