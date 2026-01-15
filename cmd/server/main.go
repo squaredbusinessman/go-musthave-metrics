@@ -43,10 +43,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("db pool init failure: %v", err)
 		}
-		defer pool.Close()
+		dbPool = pool
+		defer dbPool.Close()
 
-		if err = migrations.Up(pool, "migrations"); err != nil {
-			log.Fatalf("migrations failure: %v", err)
+		if err = migrations.Up(dbPool, "migrations"); err != nil {
+			myLog.Log.Error("migrations failure", zap.Error(err))
 		}
 
 		store = repository.NewDBStorage(dbPool)
