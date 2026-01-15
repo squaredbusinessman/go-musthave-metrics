@@ -14,6 +14,7 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
+	"github.com/squaredbusinessman/go-musthave-metrics/migrations"
 	"go.uber.org/zap"
 )
 
@@ -42,8 +43,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("db pool init failure: %v", err)
 		}
-		dbPool = pool
-		defer dbPool.Close()
+		defer pool.Close()
+
+		if err = migrations.Up(pool, "migrations"); err != nil {
+			log.Fatalf("migrations failure: %v", err)
+		}
 
 		store = repository.NewDBStorage(dbPool)
 
