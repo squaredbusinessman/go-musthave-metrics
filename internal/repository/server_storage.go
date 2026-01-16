@@ -16,6 +16,7 @@ type Storage interface {
 	GetGauge(ctx context.Context, name string) (float64, error)
 	GetCounter(ctx context.Context, name string) (int64, error)
 	Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
+	UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error
 }
 
 type MemStorage struct {

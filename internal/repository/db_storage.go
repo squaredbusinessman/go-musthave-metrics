@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
@@ -118,4 +119,45 @@ func (db *DBStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map
 	rows.Close()
 
 	return gauges, counters, nil
+}
+
+func (db *DBStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	b := &pgx.Batch{}
+	queued := 0
+
+	for _, m := range metrics {
+		switch m.MType {
+		case models.MetricTypeGauge:
+			if m.Value == nil {
+				return apperr.ErrBadMetricValue
+			}
+			b.Queue(qUpsertGauge, m.ID, *m.Value)
+			queued++
+		case models.MetricTypeCounter:
+			if m.Delta == nil {
+				return apperr.ErrBadMetricValue
+			}
+			b.Queue(qUpsertCounter, m.ID, *m.Delta)
+			queued++
+		default:
+			return apperr.ErrUnknownMetricType
+		}
+	}
+
+	br := tx.SendBatch(ctx, b)
+	defer br.Close()
+
+	for i := 0; i < queued; i++ {
+		if _, err = br.Exec(); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }

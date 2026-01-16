@@ -5,14 +5,9 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
-)
-
-var (
-	ErrUnknownMetricType = errors.New("unknown metric type")
-	ErrBadMetricValue    = errors.New("bad metric value")
-	ErrMetricNotFound    = errors.New("metric not found")
 )
 
 type MetricsService interface {
@@ -52,7 +47,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 	case models.MetricTypeGauge:
 		val, err := strconv.ParseFloat(m.Value, 64)
 		if err != nil {
-			return ErrBadMetricValue
+			return apperr.ErrBadMetricValue
 		}
 
 		if err = s.store.SetGauge(ctx, m.Name, models.Gauge{Value: val}); err != nil {
@@ -65,7 +60,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 	case models.MetricTypeCounter:
 		val, err := strconv.ParseInt(m.Value, 10, 64)
 		if err != nil {
-			return ErrBadMetricValue
+			return apperr.ErrBadMetricValue
 		}
 
 		if err = s.store.AddCounter(ctx, m.Name, val); err != nil {
@@ -76,7 +71,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 		return nil
 
 	default:
-		return ErrUnknownMetricType
+		return apperr.ErrUnknownMetricType
 	}
 }
 
@@ -84,7 +79,7 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 	switch m.MType {
 	case models.MetricTypeGauge:
 		if m.Value == nil {
-			return ErrBadMetricValue
+			return apperr.ErrBadMetricValue
 		}
 
 		if err := s.store.SetGauge(ctx, m.ID, models.Gauge{Value: *m.Value}); err != nil {
@@ -94,7 +89,7 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 		return nil
 	case models.MetricTypeCounter:
 		if m.Delta == nil {
-			return ErrBadMetricValue
+			return apperr.ErrBadMetricValue
 		}
 		if err := s.store.AddCounter(ctx, m.ID, *m.Delta); err != nil {
 			return err
@@ -102,8 +97,17 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 		s.triggerAfterUpdate()
 		return nil
 	default:
-		return ErrUnknownMetricType
+		return apperr.ErrUnknownMetricType
 	}
+}
+
+func (s *metricsService) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
+	for _, m := range metrics {
+		if err := s.UpdateMetricJSON(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetMetric получение одной метрики, выводим строку для удобства использования в HTTP
@@ -113,7 +117,7 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 		g, err := s.store.GetGauge(ctx, m.Name)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return "", ErrMetricNotFound
+				return "", apperr.ErrBadMetricValue
 			}
 			return "", err
 		}
@@ -123,13 +127,13 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 		c, err := s.store.GetCounter(ctx, m.Name)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return "", ErrMetricNotFound
+				return "", apperr.ErrMetricNotFound
 			}
 			return "", err
 		}
 		return strconv.FormatInt(c, 10), nil
 	default:
-		return "", ErrUnknownMetricType
+		return "", apperr.ErrUnknownMetricType
 	}
 }
 
@@ -143,7 +147,7 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 		g, err := s.store.GetGauge(ctx, m.ID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, ErrMetricNotFound
+				return nil, apperr.ErrMetricNotFound
 			}
 			return nil, err
 		}
@@ -153,14 +157,14 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 		c, err := s.store.GetCounter(ctx, m.ID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, ErrMetricNotFound
+				return nil, apperr.ErrMetricNotFound
 			}
 			return nil, err
 		}
 		resp.Delta = &c
 
 	default:
-		return nil, ErrUnknownMetricType
+		return nil, apperr.ErrUnknownMetricType
 	}
 
 	return &resp, nil
