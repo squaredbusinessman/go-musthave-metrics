@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/retry"
 	"go.uber.org/zap"
 )
 
@@ -37,20 +40,47 @@ func normalizeReportFormat(format string) string {
 	}
 }
 
-// SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
-func SendMetric(client *resty.Client, m models.Metric) error {
-
-	postPath := path.Join("update", m.Type, m.Name, m.Value)
-
-	resp, err := client.R().
-		SetHeader("Content-Type", "text/plain").
-		Post(postPath)
-	if err != nil {
-		return err
+func isRetryableNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
 
-	if !resp.IsSuccess() {
-		return fmt.Errorf("bad status: %s", resp.Status())
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+
+	return false
+}
+
+// SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
+func SendMetric(client *resty.Client, m models.Metric) error {
+	postPath := path.Join("update", m.Type, m.Name, m.Value)
+
+	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
+		resp, err := client.R().
+			SetHeader("Content-Type", "text/plain").
+			Post(postPath)
+		if err != nil {
+			return err
+		}
+		if !resp.IsSuccess() {
+			return fmt.Errorf("bad status: %s", resp.Status())
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	myLog.Log.
@@ -72,17 +102,21 @@ func sendMetricJSON(client *resty.Client, metric models.Metrics) error {
 		return err
 	}
 
-	resp, err := client.R().
-		SetHeader("Content-Type", "application/json").
-		SetHeader("Content-Encoding", "gzip").
-		SetBody(body).
-		Post(updatePath)
-	if err != nil {
+	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
+		resp, err := client.R().
+			SetHeader("Content-Type", "application/json").
+			SetHeader("Content-Encoding", "gzip").
+			SetBody(body).
+			Post(updatePath)
+		if err != nil {
+			return err
+		}
+		if !resp.IsSuccess() {
+			return fmt.Errorf("bad status: %s", resp.Status())
+		}
+		return nil
+	}); err != nil {
 		return err
-	}
-
-	if !resp.IsSuccess() {
-		return fmt.Errorf("bad status: %s", resp.Status())
 	}
 
 	myLog.Log.Info("Metric sent", zap.String("metric", metric.ID), zap.String("format", ReportFormatJSON))
@@ -104,26 +138,32 @@ func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics) error 
 		return err
 	}
 
-	resp, err := client.R().
-		SetHeader("Content-Type", "application/json").
-		SetHeader("Content-Encoding", "gzip").
-		SetBody(body).
-		Post(updatesPath)
-	if err != nil {
+	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
+		resp, err := client.R().
+			SetHeader("Content-Type", "application/json").
+			SetHeader("Content-Encoding", "gzip").
+			SetBody(body).
+			Post(updatesPath)
+		if err != nil {
+			return err
+		}
+
+		if resp.IsSuccess() {
+			return nil
+		}
+
+		switch resp.StatusCode() {
+		case http.StatusNotFound, http.StatusMethodNotAllowed:
+			return errBatchUnsupported
+		default:
+			return fmt.Errorf("bad status: %s", resp.Status())
+		}
+	}); err != nil {
 		return err
 	}
 
-	if resp.IsSuccess() {
-		myLog.Log.Info("Metrics batch sent", zap.Int("count", len(metrics)), zap.String("format", ReportFormatJSON))
-		return nil
-	}
-
-	switch resp.StatusCode() {
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return errBatchUnsupported
-	default:
-		return fmt.Errorf("bad status: %s", resp.Status())
-	}
+	myLog.Log.Info("Metrics batch sent", zap.Int("count", len(metrics)), zap.String("format", ReportFormatJSON))
+	return nil
 }
 
 func gzipPayload(payload []byte) ([]byte, error) {
