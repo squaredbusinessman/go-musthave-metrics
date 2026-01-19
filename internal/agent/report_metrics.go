@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"strconv"
 	"strings"
@@ -18,7 +23,10 @@ const (
 	ReportFormatPlain = "plain"
 	ReportFormatJSON  = "json"
 	updatePath        = "/update"
+	updatesPath       = "/updates"
 )
+
+var errBatchUnsupported = errors.New("batch updates not supported")
 
 func normalizeReportFormat(format string) string {
 	switch strings.ToLower(format) {
@@ -53,34 +61,21 @@ func SendMetric(client *resty.Client, m models.Metric) error {
 	return nil
 }
 
-// Отправка метрики в формате json
-func sendMetricJSON(client *resty.Client, m models.Metric) error {
-
-	metricJSON := models.Metrics{
-		ID:    m.Name,
-		MType: m.Type,
+func sendMetricJSON(client *resty.Client, metric models.Metrics) error {
+	payload, err := json.Marshal(metric)
+	if err != nil {
+		return err
 	}
 
-	switch m.Type {
-	case models.MetricTypeGauge:
-		val, err := strconv.ParseFloat(m.Value, 64)
-		if err != nil {
-			return fmt.Errorf("bad gauge value %q: %w", m.Value, err)
-		}
-		metricJSON.Value = &val
-	case models.MetricTypeCounter:
-		delta, err := strconv.ParseInt(m.Value, 10, 64)
-		if err != nil {
-			return fmt.Errorf("bad counter value %q: %w", m.Value, err)
-		}
-		metricJSON.Delta = &delta
-	default:
-		return fmt.Errorf("unknown metric type %q", m.Type)
+	body, err := gzipPayload(payload)
+	if err != nil {
+		return err
 	}
 
 	resp, err := client.R().
 		SetHeader("Content-Type", "application/json").
-		SetBody(metricJSON).
+		SetHeader("Content-Encoding", "gzip").
+		SetBody(body).
 		Post(updatePath)
 	if err != nil {
 		return err
@@ -90,29 +85,114 @@ func sendMetricJSON(client *resty.Client, m models.Metric) error {
 		return fmt.Errorf("bad status: %s", resp.Status())
 	}
 
-	myLog.Log.
-		Info("Metric sent",
-			zap.String("metric", m.Name),
-			zap.String("value", m.Value),
-			zap.String("format", ReportFormatJSON))
+	myLog.Log.Info("Metric sent", zap.String("metric", metric.ID), zap.String("format", ReportFormatJSON))
 	return nil
+}
+
+func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	payload, err := json.Marshal(metrics)
+	if err != nil {
+		return err
+	}
+
+	body, err := gzipPayload(payload)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.R().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("Content-Encoding", "gzip").
+		SetBody(body).
+		Post(updatesPath)
+	if err != nil {
+		return err
+	}
+
+	if resp.IsSuccess() {
+		myLog.Log.Info("Metrics batch sent", zap.Int("count", len(metrics)), zap.String("format", ReportFormatJSON))
+		return nil
+	}
+
+	switch resp.StatusCode() {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return errBatchUnsupported
+	default:
+		return fmt.Errorf("bad status: %s", resp.Status())
+	}
+}
+
+func gzipPayload(payload []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(payload); err != nil {
+		_ = zw.Close()
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]models.Counter) []models.Metrics {
+	metrics := make([]models.Metrics, 0, len(gauges)+len(counters))
+	for name, value := range gauges {
+		v := value.Value
+		metrics = append(metrics, models.Metrics{
+			ID:    name,
+			MType: models.MetricTypeGauge,
+			Value: &v,
+		})
+	}
+	for name, value := range counters {
+		d := value.Value
+		metrics = append(metrics, models.Metrics{
+			ID:    name,
+			MType: models.MetricTypeCounter,
+			Delta: &d,
+		})
+	}
+	return metrics
 }
 
 // ReportMetrics функция отправки всех фиксируемых метрик
 func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string) {
 	format := normalizeReportFormat(reportFormat)
-	sendFunc := SendMetric
-	if format == ReportFormatJSON {
-		sendFunc = sendMetricJSON
-	}
 
 	gauges, counters, err := store.Snapshot(context.Background())
 	if err != nil {
 		myLog.Log.Warn("Failed to snapshot metrics", zap.Error(err))
 		return
 	}
+
+	if format == ReportFormatJSON {
+		metrics := snapshotToMetrics(gauges, counters)
+		if len(metrics) == 0 {
+			return
+		}
+
+		if err := sendMetricsBatchJSON(client, metrics); err != nil {
+			if errors.Is(err, errBatchUnsupported) {
+				for _, metric := range metrics {
+					if err := sendMetricJSON(client, metric); err != nil {
+						myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
+					}
+				}
+				return
+			}
+
+			myLog.Log.Warn("Failed to send metrics batch", zap.Error(err))
+		}
+		return
+	}
+
 	for name, value := range gauges {
-		if err := sendFunc(
+		if err := SendMetric(
 			client,
 			models.Metric{
 				Type:  models.MetricTypeGauge,
@@ -124,7 +204,7 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 	}
 
 	for name, value := range counters {
-		if err := sendFunc(
+		if err := SendMetric(
 			client,
 			models.Metric{
 				Type:  models.MetricTypeCounter,

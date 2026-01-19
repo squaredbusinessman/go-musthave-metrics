@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -179,23 +180,39 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	}
 
 	var mu sync.Mutex
+	callCount := 0
 	payloads := make(map[string]models.Metrics)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/update" {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+
+		if r.URL.Path != "/updates" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 			t.Fatalf("Content-Type = %s, want application/json", ct)
 		}
+		if enc := r.Header.Get("Content-Encoding"); enc != "gzip" {
+			t.Fatalf("Content-Encoding = %s, want gzip", enc)
+		}
 
-		var m models.Metrics
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		reader, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("failed to create gzip reader: %v", err)
+		}
+		defer reader.Close()
+
+		var batch []models.Metrics
+		if err := json.NewDecoder(reader).Decode(&batch); err != nil {
 			t.Fatalf("failed to decode json: %v", err)
 		}
 
 		mu.Lock()
-		payloads[m.ID] = m
+		for _, metric := range batch {
+			payloads[metric.ID] = metric
+		}
 		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
@@ -206,6 +223,10 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+
+	if callCount != 1 {
+		t.Fatalf("want one batch request, got %d", callCount)
+	}
 
 	if len(payloads) != 2 {
 		t.Fatalf("want two payloads, got %d", len(payloads))
