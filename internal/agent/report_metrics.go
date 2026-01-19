@@ -57,11 +57,7 @@ func isRetryableNetErr(err error) bool {
 	}
 
 	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		return true
-	}
-
-	return false
+	return errors.As(err, &urlErr)
 }
 
 // SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
