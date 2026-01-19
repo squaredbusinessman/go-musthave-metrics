@@ -105,11 +105,13 @@ func main() {
 	r.Post("/update", handler.UpdateMetricJSON(metricsService))
 	// батч-обновление метрик
 	r.Post("/updates", handler.UpdateMetricsBatch(metricsService))
+	r.Post("/updates/", handler.UpdateMetricsBatch(metricsService))
 	// смотрим метрики
 	r.Get("/", handler.GetAllMetrics(metricsService))
 	r.Get("/value/{type}/{name}", handler.GetMetric(metricsService))
 	// получаем JSON со значением метрики из бд
 	r.Post("/value", handler.GetMetricJSON(metricsService))
+	r.Post("/value/", handler.GetMetricJSON(metricsService))
 	// проверка соединения с БД
 	r.Get("/ping", handler.Ping(dbPool))
 

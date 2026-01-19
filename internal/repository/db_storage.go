@@ -151,12 +151,15 @@ func (db *DBStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Me
 	}
 
 	br := tx.SendBatch(ctx, b)
-	defer br.Close()
 
 	for i := 0; i < queued; i++ {
 		if _, err = br.Exec(); err != nil {
 			return err
 		}
+	}
+
+	if err := br.Close(); err != nil {
+		return err
 	}
 
 	return tx.Commit(ctx)
