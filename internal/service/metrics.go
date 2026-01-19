@@ -119,7 +119,7 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 		g, err := s.store.GetGauge(ctx, m.Name)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return "", apperr.ErrBadMetricValue
+				return "", apperr.ErrMetricNotFound
 			}
 			return "", err
 		}
