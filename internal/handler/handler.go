@@ -126,6 +126,43 @@ func UpdateMetricJSON(ms service.MetricsService) http.HandlerFunc {
 	}
 }
 
+func UpdateMetricsBatch(ms service.MetricsService) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+
+		if ct := request.Header.Get("Content-Type"); ct != "" && !isJSONContentType(ct) {
+			http.Error(writer, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
+			return
+		}
+
+		logger.Log.Debug("decoding request (updates)")
+		var req []models.Metrics
+		defer request.Body.Close()
+		if err := json.NewDecoder(request.Body).Decode(&req); err != nil {
+			logger.Log.Error("cannot decode request (updates) JSON body", zap.Error(err))
+			http.Error(writer, "bad JSON", http.StatusBadRequest)
+			return
+		}
+
+		for _, metric := range req {
+			if metric.ID == "" || metric.MType == "" {
+				http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+				return
+			}
+		}
+
+		if err := ms.UpdateMetricsBatch(request.Context(), req); err != nil {
+			apperr.WriteServiceError(writer, err)
+			return
+		}
+
+		writer.WriteHeader(http.StatusOK)
+	}
+}
+
 func GetMetric(ms service.MetricsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

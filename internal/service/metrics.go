@@ -16,6 +16,7 @@ type MetricsService interface {
 	GetMetric(ctx context.Context, m models.Metric) (string, error)
 	GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error)
 	GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error)
+	UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error
 }
 
 type metricsService struct {
@@ -102,10 +103,11 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 }
 
 func (s *metricsService) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
-	for _, m := range metrics {
-		if err := s.UpdateMetricJSON(ctx, m); err != nil {
-			return err
-		}
+	if err := s.store.UpdateMetricsBatch(ctx, metrics); err != nil {
+		return err
+	}
+	if len(metrics) > 0 {
+		s.triggerAfterUpdate()
 	}
 	return nil
 }

@@ -3,8 +3,6 @@ package apperr
 import (
 	"errors"
 	"net/http"
-
-	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 )
 
 type errorResponse struct {
@@ -13,9 +11,9 @@ type errorResponse struct {
 }
 
 var serviceErrorResponses = map[error]errorResponse{
-	service.ErrBadMetricValue:    {status: http.StatusBadRequest, message: "bad metric value"},
-	service.ErrUnknownMetricType: {status: http.StatusBadRequest, message: "unknown metrics type"},
-	service.ErrMetricNotFound:    {status: http.StatusNotFound},
+	ErrBadMetricValue:    {status: http.StatusBadRequest, message: "bad metric value"},
+	ErrUnknownMetricType: {status: http.StatusBadRequest, message: "unknown metrics type"},
+	ErrMetricNotFound:    {status: http.StatusNotFound},
 }
 
 func WriteServiceError(w http.ResponseWriter, err error) {

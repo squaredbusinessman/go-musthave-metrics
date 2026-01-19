@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
@@ -88,4 +89,41 @@ func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, ma
 	}
 
 	return gaugesCopy, countersCopy, nil
+}
+
+func (ms *MemStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	ms.mutex.Lock()
+	defer ms.mutex.Unlock()
+
+	for _, metric := range metrics {
+		switch metric.MType {
+		case models.MetricTypeGauge:
+			if metric.Value == nil {
+				return apperr.ErrBadMetricValue
+			}
+		case models.MetricTypeCounter:
+			if metric.Delta == nil {
+				return apperr.ErrBadMetricValue
+			}
+		default:
+			return apperr.ErrUnknownMetricType
+		}
+	}
+
+	for _, metric := range metrics {
+		switch metric.MType {
+		case models.MetricTypeGauge:
+			ms.gauges[metric.ID] = models.Gauge{Value: *metric.Value}
+		case models.MetricTypeCounter:
+			counter := ms.counters[metric.ID]
+			counter.Value += *metric.Delta
+			ms.counters[metric.ID] = counter
+		}
+	}
+
+	return nil
 }
