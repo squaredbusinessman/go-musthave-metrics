@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -90,8 +92,13 @@ func TestSendMetricHTTPError(t *testing.T) {
 
 func TestReportMetricsSendsAllValues(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 1})
-	store.AddCounter("PollCount", 5)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 1}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 5); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var mu sync.Mutex
 	requests := make(map[string]int)
@@ -132,8 +139,13 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 
 func TestReportMetricsContinuesAfterError(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 1})
-	store.AddCounter("PollCount", 5)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 1}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 5); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var callCount int
 
@@ -159,27 +171,48 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 
 func TestReportMetricsJSONFormat(t *testing.T) {
 	store := storage.NewMemStorage()
-	store.SetGauge("Alloc", models.Gauge{Value: 2.5})
-	store.AddCounter("PollCount", 3)
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 2.5}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+	if err := store.AddCounter(ctx, "PollCount", 3); err != nil {
+		t.Fatalf("AddCounter() error = %v", err)
+	}
 
 	var mu sync.Mutex
+	callCount := 0
 	payloads := make(map[string]models.Metrics)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/update" {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+
+		if r.URL.Path != "/updates" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 			t.Fatalf("Content-Type = %s, want application/json", ct)
 		}
+		if enc := r.Header.Get("Content-Encoding"); enc != "gzip" {
+			t.Fatalf("Content-Encoding = %s, want gzip", enc)
+		}
 
-		var m models.Metrics
-		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		reader, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("failed to create gzip reader: %v", err)
+		}
+		defer reader.Close()
+
+		var batch []models.Metrics
+		if err := json.NewDecoder(reader).Decode(&batch); err != nil {
 			t.Fatalf("failed to decode json: %v", err)
 		}
 
 		mu.Lock()
-		payloads[m.ID] = m
+		for _, metric := range batch {
+			payloads[metric.ID] = metric
+		}
 		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
@@ -190,6 +223,10 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
+
+	if callCount != 1 {
+		t.Fatalf("want one batch request, got %d", callCount)
+	}
 
 	if len(payloads) != 2 {
 		t.Fatalf("want two payloads, got %d", len(payloads))

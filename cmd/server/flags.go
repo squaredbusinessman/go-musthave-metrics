@@ -4,62 +4,79 @@ import (
 	"flag"
 	"log"
 	"os"
-	"strconv"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Config struct {
-	RunAddr         string
-	LogLevel        string
-	StoreInterval   int
-	FileStoragePath string
-	Restore         bool
+	Server   ServerConfig
+	Storage  StorageConfig
+	Database DBConfig
+}
+
+type DBConfig struct {
+	DSN string `env:"DATABASE_DSN"`
+}
+
+type ServerConfig struct {
+	RunAddr  string `env:"ADDRESS"`
+	LogLevel string `env:"LOG_LEVEL"`
+}
+
+type StorageConfig struct {
+	StoreInterval      int `env:"STORE_INTERVAL"`
+	FileStorageEnabled bool
+	FileStoragePath    string `env:"FILE_STORAGE_PATH"`
+	Restore            bool   `env:"RESTORE"`
 }
 
 func parseConfig() Config {
 	cfg := Config{
-		StoreInterval:   300,
-		FileStoragePath: "/tmp/devops-metrics-db.json",
-		Restore:         true,
+		Server: ServerConfig{
+			RunAddr:  ":8080",
+			LogLevel: "info",
+		},
+		Storage: StorageConfig{
+			StoreInterval:      300,
+			FileStorageEnabled: false,
+			FileStoragePath:    "/tmp/devops-metrics-db.json",
+			Restore:            true,
+		},
 	}
 
-	flag.StringVar(&cfg.RunAddr, "a", ":8080", "Run server address")
-	flag.StringVar(&cfg.LogLevel, "l", "info", "log level")
-	flag.IntVar(&cfg.StoreInterval, "i", cfg.StoreInterval, "store interval in seconds (0 for sync)")
-	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "file storage path")
-	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "restore metrics from file on startup")
+	flag.StringVar(&cfg.Server.RunAddr, "a", cfg.Server.RunAddr, "Run server address")
+	flag.StringVar(&cfg.Server.LogLevel, "l", cfg.Server.LogLevel, "log level")
+	flag.IntVar(&cfg.Storage.StoreInterval, "i", cfg.Storage.StoreInterval, "store interval in seconds (0 for sync)")
+	flag.StringVar(&cfg.Storage.FileStoragePath, "f", cfg.Storage.FileStoragePath, "file storage path")
+	flag.BoolVar(&cfg.Storage.Restore, "r", cfg.Storage.Restore, "restore metrics from file on startup")
+	flag.StringVar(&cfg.Database.DSN, "d", "", "database DSN")
 
 	flag.Parse()
 
-	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
-		cfg.RunAddr = envAddr
+	// Не понимаю, насколько это кринж.
+	// Суть в том чтобы чекнуть, был ли флаг -f передан явно.
+	fileFlagSet := false
+
+	flag.CommandLine.Visit(
+		func(f *flag.Flag) {
+			if f.Name == "f" {
+				fileFlagSet = true
+			}
+		})
+
+	if err := cleanenv.ReadEnv(&cfg); err != nil {
+		log.Printf("(server) ignoring env vars due to error: %v", err)
 	}
 
-	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
-		cfg.LogLevel = envLogLevel
-	}
-
-	if envInterval := os.Getenv("STORE_INTERVAL"); envInterval != "" {
-		if v, err := strconv.Atoi(envInterval); err == nil {
-			cfg.StoreInterval = v
-		} else {
-			log.Printf("ignoring STORE_INTERVAL=%q: %v", envInterval, err)
-		}
-	}
-
+	// тут включаем файл только если явно задан env или флаг -f
 	if envFilePath := os.Getenv("FILE_STORAGE_PATH"); envFilePath != "" {
-		cfg.FileStoragePath = envFilePath
+		cfg.Storage.FileStorageEnabled = true
+	} else if fileFlagSet && cfg.Storage.FileStoragePath != "" {
+		cfg.Storage.FileStorageEnabled = true
 	}
 
-	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
-		if v, err := strconv.ParseBool(envRestore); err == nil {
-			cfg.Restore = v
-		} else {
-			log.Printf("ignoring RESTORE=%q: %v", envRestore, err)
-		}
-	}
-
-	if cfg.StoreInterval < 0 {
-		cfg.StoreInterval = 0
+	if cfg.Storage.StoreInterval < 0 {
+		cfg.Storage.StoreInterval = 0
 	}
 
 	return cfg

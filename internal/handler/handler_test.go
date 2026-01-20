@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
-	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 )
 
 type mockMetricsService struct {
@@ -25,6 +25,10 @@ type mockMetricsService struct {
 	updateJSONCalled  bool
 	updatedMetricJSON models.Metrics
 	updateJSONErr     error
+
+	updateBatchCalled   bool
+	updatedBatchMetrics []models.Metrics
+	updateBatchErr      error
 
 	getMetricJSONCalled bool
 	getMetricJSONArg    models.Metrics
@@ -54,6 +58,12 @@ func (m *mockMetricsService) UpdateMetricJSON(ctx context.Context, metric models
 	m.updateJSONCalled = true
 	m.updatedMetricJSON = metric
 	return m.updateJSONErr
+}
+
+func (m *mockMetricsService) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
+	m.updateBatchCalled = true
+	m.updatedBatchMetrics = metrics
+	return m.updateBatchErr
 }
 
 func (m *mockMetricsService) GetMetric(ctx context.Context, metric models.Metric) (string, error) {
@@ -133,7 +143,7 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			expectUpdate: true,
 			wantMetric:   &models.Metric{Type: "unknown", Name: "name", Value: "1"},
 			setup: func(m *mockMetricsService) {
-				m.updateErr = service.ErrUnknownMetricType
+				m.updateErr = apperr.ErrUnknownMetricType
 			},
 		},
 		{
@@ -146,7 +156,7 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			expectUpdate: true,
 			wantMetric:   &models.Metric{Type: "gauge", Name: "temperature", Value: "not-a-number"},
 			setup: func(m *mockMetricsService) {
-				m.updateErr = service.ErrBadMetricValue
+				m.updateErr = apperr.ErrBadMetricValue
 			},
 		},
 		{
@@ -159,7 +169,7 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			expectUpdate: true,
 			wantMetric:   &models.Metric{Type: "counter", Name: "requests", Value: "not-a-number"},
 			setup: func(m *mockMetricsService) {
-				m.updateErr = service.ErrBadMetricValue
+				m.updateErr = apperr.ErrBadMetricValue
 			},
 		},
 		{
@@ -188,7 +198,8 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			r.Post("/update/{type}/{name}/{value}", AcceptMetricsToStorage(svc))
+			h := New(svc, nil)
+			r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
 
 			req := httptest.NewRequest(tt.args.method, tt.args.target, strings.NewReader(tt.args.body))
 			req.Header.Set("Content-Type", "text/plain")
@@ -250,7 +261,7 @@ func TestGetMetric(t *testing.T) {
 			method: http.MethodGet,
 			path:   "/value/gauge/miss",
 			setup: func(m *mockMetricsService) {
-				m.metricErr = service.ErrMetricNotFound
+				m.metricErr = apperr.ErrMetricNotFound
 			},
 			wantCode:     http.StatusNotFound,
 			expectCalled: true,
@@ -271,7 +282,8 @@ func TestGetMetric(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			r.Get("/value/{type}/{name}", GetMetric(svc))
+			h := New(svc, nil)
+			r.Get("/value/{type}/{name}", h.GetMetric)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -303,7 +315,8 @@ func TestGetAllMetrics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	GetAllMetrics(svc).ServeHTTP(w, req)
+	h := New(svc, nil)
+	http.HandlerFunc(h.GetAllMetrics).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
