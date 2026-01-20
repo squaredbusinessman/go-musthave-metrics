@@ -198,7 +198,8 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			r.Post("/update/{type}/{name}/{value}", AcceptMetricsToStorage(svc))
+			h := New(svc, nil)
+			r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
 
 			req := httptest.NewRequest(tt.args.method, tt.args.target, strings.NewReader(tt.args.body))
 			req.Header.Set("Content-Type", "text/plain")
@@ -281,7 +282,8 @@ func TestGetMetric(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			r.Get("/value/{type}/{name}", GetMetric(svc))
+			h := New(svc, nil)
+			r.Get("/value/{type}/{name}", h.GetMetric)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -313,7 +315,8 @@ func TestGetAllMetrics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	GetAllMetrics(svc).ServeHTTP(w, req)
+	h := New(svc, nil)
+	http.HandlerFunc(h.GetAllMetrics).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

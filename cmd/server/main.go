@@ -76,6 +76,7 @@ func main() {
 	}
 
 	metricsService := service.NewMetricsService(store, serviceOpts...)
+	h := handler.New(metricsService, dbPool)
 
 	var stopStore chan struct{}
 	if fileStorage != nil && cfg.Storage.StoreInterval > 0 {
@@ -100,20 +101,20 @@ func main() {
 	r.Use(chiMiddleware.StripSlashes)
 
 	// пишем метрики
-	r.Post("/update/{type}/{name}/{value}", handler.AcceptMetricsToStorage(metricsService))
+	r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
 	// новый эндпоинт для фиксации данных приходящих как JSON
-	r.Post("/update", handler.UpdateMetricJSON(metricsService))
+	r.Post("/update", h.UpdateMetricJSON)
 	// батч-обновление метрик
-	r.Post("/updates", handler.UpdateMetricsBatch(metricsService))
-	r.Post("/updates/", handler.UpdateMetricsBatch(metricsService))
+	r.Post("/updates", h.UpdateMetricsBatch)
+	r.Post("/updates/", h.UpdateMetricsBatch)
 	// смотрим метрики
-	r.Get("/", handler.GetAllMetrics(metricsService))
-	r.Get("/value/{type}/{name}", handler.GetMetric(metricsService))
+	r.Get("/", h.GetAllMetrics)
+	r.Get("/value/{type}/{name}", h.GetMetric)
 	// получаем JSON со значением метрики из бд
-	r.Post("/value", handler.GetMetricJSON(metricsService))
-	r.Post("/value/", handler.GetMetricJSON(metricsService))
+	r.Post("/value", h.GetMetricJSON)
+	r.Post("/value/", h.GetMetricJSON)
 	// проверка соединения с БД
-	r.Get("/ping", handler.Ping(dbPool))
+	r.Get("/ping", h.Ping)
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
