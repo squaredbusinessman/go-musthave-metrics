@@ -156,7 +156,7 @@ func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.R
 
 	for _, metric := range req {
 		if metric.ID == "" || metric.MType == "" {
-			http.Error(writer, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+			http.Error(writer, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 	}
