@@ -23,7 +23,7 @@ func main() {
 	cfg := parseConfig()
 
 	// инициализация логера
-	if err := myLog.Initialize(cfg.LogLevel); err != nil {
+	if err := myLog.Initialize(cfg.Server.LogLevel); err != nil {
 		log.Fatalf("init logger failure: %v", err)
 	}
 	defer myLog.Log.Sync()
@@ -38,8 +38,8 @@ func main() {
 	// Подключаемся к postgreSQL через драйвер pgx,
 	// сразу используем пул в будущем эффективнее переиспользовать соединения
 	// и распределять ресурсы
-	case cfg.DatabaseDSN != "":
-		pool, err := pgxpool.New(context.Background(), cfg.DatabaseDSN)
+	case cfg.Database.DSN != "":
+		pool, err := pgxpool.New(context.Background(), cfg.Database.DSN)
 		if err != nil {
 			log.Fatalf("db pool init failure: %v", err)
 		}
@@ -52,11 +52,11 @@ func main() {
 
 		store = repository.NewDBStorage(dbPool)
 
-	case cfg.FileStorageEnabled:
+	case cfg.Storage.FileStorageEnabled:
 		store = repository.NewMemStorage()
-		fileStorage = repository.NewFileStorage(cfg.FileStoragePath, store)
+		fileStorage = repository.NewFileStorage(cfg.Storage.FileStoragePath, store)
 
-		if cfg.Restore {
+		if cfg.Storage.Restore {
 			if err := fileStorage.Restore(); err != nil {
 				log.Fatalf("restore metrics failure: %v", err)
 			}
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	var serviceOpts []service.MetricsServiceOption
-	if fileStorage != nil && cfg.StoreInterval == 0 {
+	if fileStorage != nil && cfg.Storage.StoreInterval == 0 {
 		serviceOpts = append(serviceOpts, service.WithAfterUpdate(func() {
 			if err := fileStorage.Save(); err != nil {
 				myLog.Log.Error("synchronous store failure", zap.Error(err))
@@ -78,10 +78,10 @@ func main() {
 	metricsService := service.NewMetricsService(store, serviceOpts...)
 
 	var stopStore chan struct{}
-	if fileStorage != nil && cfg.StoreInterval > 0 {
+	if fileStorage != nil && cfg.Storage.StoreInterval > 0 {
 		stopStore = make(chan struct{})
 		go func() {
-			ticker := time.NewTicker(time.Duration(cfg.StoreInterval) * time.Second)
+			ticker := time.NewTicker(time.Duration(cfg.Storage.StoreInterval) * time.Second)
 			defer ticker.Stop()
 			for {
 				select {
@@ -116,8 +116,8 @@ func main() {
 	r.Get("/ping", handler.Ping(dbPool))
 
 	// активируем логирование запросов
-	myLog.Log.Info("Running server on: ", zap.String("address", cfg.RunAddr))
-	err := http.ListenAndServe(cfg.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware))
+	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
+	err := http.ListenAndServe(cfg.Server.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware))
 	if stopStore != nil {
 		close(stopStore)
 		if err := fileStorage.Save(); err != nil {
