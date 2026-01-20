@@ -2,20 +2,19 @@ package main
 
 import (
 	"flag"
-	"os"
-	"strconv"
 	"strings"
 
+	"github.com/ilyakaznacheev/cleanenv"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"go.uber.org/zap"
 )
 
 type Config struct {
-	Addr           string
-	PollInterval   int
-	ReportInterval int
-	ReportFormat   string
+	Addr           string `env:"ADDRESS"`
+	PollInterval   int    `env:"POLL_INTERVAL"`
+	ReportInterval int    `env:"REPORT_INTERVAL"`
+	ReportFormat   string `env:"REPORT_FORMAT"`
 }
 
 func parseConfig() Config {
@@ -28,34 +27,8 @@ func parseConfig() Config {
 
 	flag.Parse()
 
-	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
-		cfg.Addr = envAddr
-	}
-
-	if envPollInterval := os.Getenv("POLL_INTERVAL"); envPollInterval != "" {
-		if v, err := strconv.Atoi(envPollInterval); err == nil {
-			cfg.PollInterval = v
-		} else {
-			myLog.Log.Warn("ignoring POLL_INTERVAL=",
-				zap.String("value", envPollInterval),
-				zap.Error(err),
-			)
-		}
-	}
-
-	if envRepInterval := os.Getenv("REPORT_INTERVAL"); envRepInterval != "" {
-		if v, err := strconv.Atoi(envRepInterval); err == nil {
-			cfg.ReportInterval = v
-		} else {
-			myLog.Log.Warn("ignoring REPORT_INTERVAL=",
-				zap.String("value", envRepInterval),
-				zap.Error(err),
-			)
-		}
-	}
-
-	if envFormat := os.Getenv("REPORT_FORMAT"); envFormat != "" {
-		cfg.ReportFormat = envFormat
+	if err := cleanenv.ReadEnv(&cfg); err != nil {
+		myLog.Log.Warn("(agent) ignoring env vars due to error", zap.Error(err))
 	}
 
 	cfg.ReportFormat = normalizeReportFormat(cfg.ReportFormat)

@@ -4,17 +4,18 @@ import (
 	"flag"
 	"log"
 	"os"
-	"strconv"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Config struct {
-	RunAddr            string
-	LogLevel           string
-	StoreInterval      int
+	RunAddr            string `env:"ADDRESS"`
+	LogLevel           string `env:"LOG_LEVEL"`
+	StoreInterval      int    `env:"STORE_INTERVAL"`
 	FileStorageEnabled bool
-	FileStoragePath    string
-	Restore            bool
-	DatabaseDSN        string
+	FileStoragePath    string `env:"FILE_STORAGE_PATH"`
+	Restore            bool   `env:"RESTORE"`
+	DatabaseDSN        string `env:"DATABASE_DSN"`
 }
 
 func parseConfig() Config {
@@ -45,40 +46,15 @@ func parseConfig() Config {
 			}
 		})
 
-	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
-		cfg.RunAddr = envAddr
-	}
-
-	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
-		cfg.LogLevel = envLogLevel
-	}
-
-	if envInterval := os.Getenv("STORE_INTERVAL"); envInterval != "" {
-		if v, err := strconv.Atoi(envInterval); err == nil {
-			cfg.StoreInterval = v
-		} else {
-			log.Printf("ignoring STORE_INTERVAL=%q: %v", envInterval, err)
-		}
+	if err := cleanenv.ReadEnv(&cfg); err != nil {
+		log.Printf("(server) ignoring env vars due to error: %v", err)
 	}
 
 	// тут включаем файл только если явно задан env или флаг -f
 	if envFilePath := os.Getenv("FILE_STORAGE_PATH"); envFilePath != "" {
-		cfg.FileStoragePath = envFilePath
 		cfg.FileStorageEnabled = true
 	} else if fileFlagSet && cfg.FileStoragePath != "" {
 		cfg.FileStorageEnabled = true
-	}
-
-	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
-		if v, err := strconv.ParseBool(envRestore); err == nil {
-			cfg.Restore = v
-		} else {
-			log.Printf("ignoring RESTORE=%q: %v", envRestore, err)
-		}
-	}
-
-	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
-		cfg.DatabaseDSN = envDSN
 	}
 
 	if cfg.StoreInterval < 0 {
