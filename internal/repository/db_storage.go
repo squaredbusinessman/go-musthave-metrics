@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,38 +24,68 @@ func NewDBStorage(pool *pgxpool.Pool) *DBStorage {
 	}
 }
 
-const (
-	qUpsertGauge = `
-		INSERT INTO gauges (metric_name, value)
-		VALUES ($1, $2)
-		ON CONFLICT (metric_name)
-		DO UPDATE SET value = EXCLUDED.value
+var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
-	`
-	qUpsertCounter = `
-		INSERT INTO counters (metric_name, value)
-		VALUES ($1, $2)
-		ON CONFLICT (metric_name)
-		DO UPDATE SET value = counters.value + EXCLUDED.value
+func buildUpsertGauge(name string, value float64) (string, []interface{}, error) {
+	return psql.Insert("gauges").
+		Columns("metric_name", "value").
+		Values(name, value).
+		Suffix("ON CONFLICT (metric_name) DO UPDATE SET value = EXCLUDED.value").
+		ToSql()
+}
 
-	`
-	qGetGauge   = `SELECT value FROM gauges WHERE metric_name = $1`
-	qGetCounter = `SELECT value FROM counters WHERE metric_name = $1`
+func buildUpsertCounter(name string, value int64) (string, []interface{}, error) {
+	return psql.Insert("counters").
+		Columns("metric_name", "value").
+		Values(name, value).
+		Suffix("ON CONFLICT (metric_name) DO UPDATE SET value = counters.value + EXCLUDED.value").
+		ToSql()
+}
 
-	qSnapshotGauges   = `SELECT metric_name, value FROM gauges`
-	qSnapshotCounters = `SELECT metric_name, value FROM counters`
-)
+func buildGetGauge(name string) (string, []interface{}, error) {
+	return psql.Select("value").
+		From("gauges").
+		Where(squirrel.Eq{"metric_name": name}).
+		ToSql()
+}
+
+func buildGetCounter(name string) (string, []interface{}, error) {
+	return psql.Select("value").
+		From("counters").
+		Where(squirrel.Eq{"metric_name": name}).
+		ToSql()
+}
+
+func buildSnapshotGauges() (string, []interface{}, error) {
+	return psql.Select("metric_name", "value").
+		From("gauges").
+		ToSql()
+}
+
+func buildSnapshotCounters() (string, []interface{}, error) {
+	return psql.Select("metric_name", "value").
+		From("counters").
+		ToSql()
+}
 
 func (db *DBStorage) SetGauge(ctx context.Context, name string, value models.Gauge) error {
 	return retry.Do(ctx, isRetryablePGErr, func() error {
-		_, err := db.pool.Exec(ctx, qUpsertGauge, name, value.Value)
+		sql, args, err := buildUpsertGauge(name, value.Value)
+		if err != nil {
+			return err
+		}
+		_, err = db.pool.Exec(ctx, sql, args...)
 		return err
 	})
 }
 
 func (db *DBStorage) AddCounter(ctx context.Context, name string, value int64) error {
 	return retry.Do(ctx, isRetryablePGErr, func() error {
-		_, err := db.pool.Exec(ctx, qUpsertCounter, name, value)
+		sql, args, err := buildUpsertCounter(name, value)
+		if err != nil {
+			return err
+		}
+		_, err = db.pool.Exec(ctx, sql, args...)
 		return err
 	})
 }
@@ -62,7 +93,11 @@ func (db *DBStorage) AddCounter(ctx context.Context, name string, value int64) e
 func (db *DBStorage) GetGauge(ctx context.Context, name string) (float64, error) {
 	var v float64
 	err := retry.Do(ctx, isRetryablePGErr, func() error {
-		return db.pool.QueryRow(ctx, qGetGauge, name).Scan(&v)
+		sql, args, err := buildGetGauge(name)
+		if err != nil {
+			return err
+		}
+		return db.pool.QueryRow(ctx, sql, args...).Scan(&v)
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -76,7 +111,11 @@ func (db *DBStorage) GetGauge(ctx context.Context, name string) (float64, error)
 func (db *DBStorage) GetCounter(ctx context.Context, name string) (int64, error) {
 	var v int64
 	err := retry.Do(ctx, isRetryablePGErr, func() error {
-		return db.pool.QueryRow(ctx, qGetCounter, name).Scan(&v)
+		sql, args, err := buildGetCounter(name)
+		if err != nil {
+			return err
+		}
+		return db.pool.QueryRow(ctx, sql, args...).Scan(&v)
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -95,7 +134,11 @@ func (db *DBStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map
 		gauges = make(map[string]models.Gauge)
 		counters = make(map[string]models.Counter)
 
-		rows, err := db.pool.Query(ctx, qSnapshotGauges)
+		gaugesSQL, gaugesArgs, err := buildSnapshotGauges()
+		if err != nil {
+			return err
+		}
+		rows, err := db.pool.Query(ctx, gaugesSQL, gaugesArgs...)
 		if err != nil {
 			return err
 		}
@@ -114,7 +157,11 @@ func (db *DBStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map
 		}
 		rows.Close()
 
-		rows, err = db.pool.Query(ctx, qSnapshotCounters)
+		countersSQL, countersArgs, err := buildSnapshotCounters()
+		if err != nil {
+			return err
+		}
+		rows, err = db.pool.Query(ctx, countersSQL, countersArgs...)
 		if err != nil {
 			return err
 		}
@@ -171,10 +218,18 @@ func (db *DBStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Me
 		for _, m := range metrics {
 			switch m.MType {
 			case models.MetricTypeGauge:
-				b.Queue(qUpsertGauge, m.ID, *m.Value)
+				sql, args, err := buildUpsertGauge(m.ID, *m.Value)
+				if err != nil {
+					return err
+				}
+				b.Queue(sql, args...)
 				queued++
 			case models.MetricTypeCounter:
-				b.Queue(qUpsertCounter, m.ID, *m.Delta)
+				sql, args, err := buildUpsertCounter(m.ID, *m.Delta)
+				if err != nil {
+					return err
+				}
+				b.Queue(sql, args...)
 				queued++
 			}
 		}
