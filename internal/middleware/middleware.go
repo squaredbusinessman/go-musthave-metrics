@@ -78,16 +78,16 @@ func HashMiddleware(key string) Middleware {
 			}
 
 			// верификация
-			mustCheck := request.Method == "POST" || request.Method == "PUT" || request.Method == "PATCH" ||
-				request.ContentLength > 0 || request.Header.Get("Transfer-Encoding") != "" ||
-				request.Header.Get("HashSHA256") != ""
-
-			if mustCheck {
-				body, _ := io.ReadAll(request.Body)
-				request.Body.Close()
+			got := request.Header.Get("HashSHA256")
+			if got != "" {
+				body, err := io.ReadAll(request.Body)
+				if err != nil {
+					http.Error(writer, "bad request", http.StatusBadRequest)
+					return
+				}
+				_ = request.Body.Close()
 				computed := sha256hex(body, key)
-				got := request.Header.Get("HashSHA256")
-				if got == "" || !strings.EqualFold(got, computed) {
+				if !strings.EqualFold(got, computed) {
 					http.Error(writer, "bad hash", http.StatusBadRequest)
 					return
 				}
