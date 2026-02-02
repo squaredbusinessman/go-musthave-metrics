@@ -37,7 +37,7 @@ func TestSendMetricSuccess(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	})
+	}, "")
 
 	if err != nil {
 		t.Fatalf("SendMetric returned error: %v", err)
@@ -63,7 +63,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	})
+	}, "")
 	if err == nil {
 		t.Fatalf("expected error for non-200 status")
 	}
@@ -84,7 +84,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	})
+	}, "")
 	if err == nil {
 		t.Fatalf("expected error from HTTP client")
 	}
@@ -116,7 +116,7 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -162,7 +162,7 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "")
 
 	if callCount != 2 {
 		t.Fatalf("ReportMetrics should attempt both metrics even after error, got %d calls", callCount)
@@ -219,7 +219,7 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatJSON)
+	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "")
 
 	mu.Lock()
 	defer mu.Unlock()

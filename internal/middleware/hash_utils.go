@@ -49,20 +49,17 @@ func (r *ResponseRecorder) Body() []byte {
 }
 
 func (r *ResponseRecorder) FlushTo(w http.ResponseWriter) {
-	// headers
 	for k, vv := range r.header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
 	}
 
-	// status
 	if r.status == 0 {
 		r.status = http.StatusOK
 	}
 	w.WriteHeader(r.status)
 
-	// body
 	if r.body.Len() > 0 {
 		_, _ = w.Write(r.body.Bytes())
 	}
