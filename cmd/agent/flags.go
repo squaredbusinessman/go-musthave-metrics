@@ -16,6 +16,7 @@ type Config struct {
 	ReportInterval int    `env:"REPORT_INTERVAL"`
 	ReportFormat   string `env:"REPORT_FORMAT"`
 	Key            string `env:"KEY"`
+	RateLimit      int    `env:"RATE_LIMIT"`
 }
 
 func parseConfig() Config {
@@ -26,6 +27,7 @@ func parseConfig() Config {
 	flag.IntVar(&cfg.ReportInterval, "r", 10, "Report interval(seconds)")
 	flag.StringVar(&cfg.ReportFormat, "f", agent.ReportFormatPlain, "Report format: plain or json")
 	flag.StringVar(&cfg.Key, "k", "", "Hash key")
+	flag.IntVar(&cfg.RateLimit, "l", 1, "Rate limiting")
 
 	flag.Parse()
 
