@@ -41,7 +41,18 @@ func main() {
 		}
 	}()
 
-	// отправка метрик
+	// горутина фиксация gopsutil метрик
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.PollInterval) * time.Second)
+		defer ticker.Stop()
+
+		agent.ColletGopsutilMetrics(store)
+		for range ticker.C {
+			agent.ColletGopsutilMetrics(store)
+		}
+	}()
+
+	// горутина отправка метрик
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.ReportInterval) * time.Second)
 		defer ticker.Stop()
