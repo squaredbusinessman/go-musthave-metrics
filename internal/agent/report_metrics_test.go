@@ -20,6 +20,15 @@ func newTestClient(ts *httptest.Server) *resty.Client {
 	return resty.New().SetBaseURL(ts.URL)
 }
 
+func runJobs(jobs <-chan Job) {
+	for job := range jobs {
+		if job == nil {
+			continue
+		}
+		_ = job()
+	}
+}
+
 func TestSendMetricSuccess(t *testing.T) {
 	var receivedPath, receivedContentType string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +125,10 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "")
+	jobs := make(chan Job, 100)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
+	close(jobs)
+	runJobs(jobs)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -162,7 +174,10 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "")
+	jobs := make(chan Job, 100)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
+	close(jobs)
+	runJobs(jobs)
 
 	if callCount != 2 {
 		t.Fatalf("ReportMetrics should attempt both metrics even after error, got %d calls", callCount)
@@ -219,7 +234,10 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "")
+	jobs := make(chan Job, 100)
+	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "", jobs)
+	close(jobs)
+	runJobs(jobs)
 
 	mu.Lock()
 	defer mu.Unlock()
