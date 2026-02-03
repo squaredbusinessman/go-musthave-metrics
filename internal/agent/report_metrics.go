@@ -205,7 +205,7 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 }
 
 // ReportMetrics функция отправки всех фиксируемых метрик
-func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string) {
+func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job) {
 	format := normalizeReportFormat(reportFormat)
 
 	gauges, counters, err := store.Snapshot(context.Background())
@@ -220,44 +220,44 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 			return
 		}
 
-		if err := sendMetricsBatchJSON(client, metrics, key); err != nil {
-			if errors.Is(err, errBatchUnsupported) {
-				for _, metric := range metrics {
-					if err := sendMetricJSON(client, metric, key); err != nil {
-						myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
+		jobs <- func() error {
+			if err = sendMetricsBatchJSON(client, metrics, key); err != nil {
+				if errors.Is(err, errBatchUnsupported) {
+					for _, metric := range metrics {
+						if err := sendMetricJSON(client, metric, key); err != nil {
+							myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
+						}
 					}
+					return nil
 				}
-				return
+				return err
 			}
-
-			myLog.Log.Warn("Failed to send metrics batch", zap.Error(err))
+			return nil
 		}
 		return
 	}
 
 	for name, value := range gauges {
-		if err := SendMetric(
-			client,
-			models.Metric{
+		n := name
+		v := value.Value
+		jobs <- func() error {
+			return SendMetric(client, models.Metric{
 				Type:  models.MetricTypeGauge,
-				Name:  name,
-				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
-			},
-			key); err != nil {
-			myLog.Log.Warn("Failed to send gauge", zap.Error(err))
+				Name:  n,
+				Value: strconv.FormatFloat(v, 'f', -1, 64),
+			}, key)
 		}
 	}
 
 	for name, value := range counters {
-		if err := SendMetric(
-			client,
-			models.Metric{
+		n := name
+		v := value.Value
+		jobs <- func() error {
+			return SendMetric(client, models.Metric{
 				Type:  models.MetricTypeCounter,
-				Name:  name,
-				Value: strconv.FormatInt(value.Value, 10),
-			},
-			key); err != nil {
-			myLog.Log.Warn("Failed to send counter", zap.Error(err))
+				Name:  n,
+				Value: strconv.FormatInt(v, 10),
+			}, key)
 		}
 	}
 }
