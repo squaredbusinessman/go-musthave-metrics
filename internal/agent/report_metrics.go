@@ -61,16 +61,13 @@ func isRetryableNetErr(err error) bool {
 }
 
 // SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
-func SendMetric(client *resty.Client, m models.Metric, key string) error {
+func SendMetric(client *resty.Client, m models.Metric) error {
 	postPath := path.Join("update", m.Type, m.Name, m.Value)
 
 	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
-		req := client.R().
-			SetHeader("Content-Type", "text/plain")
-		if key != "" {
-			req.SetHeader("HashSHA256", sha256hex(nil, key))
-		}
-		resp, err := req.Post(postPath)
+		resp, err := client.R().
+			SetHeader("Content-Type", "text/plain").
+			Post(postPath)
 		if err != nil {
 			return err
 		}
@@ -90,25 +87,23 @@ func SendMetric(client *resty.Client, m models.Metric, key string) error {
 	return nil
 }
 
-func sendMetricJSON(client *resty.Client, metric models.Metrics, key string) error {
+func sendMetricJSON(client *resty.Client, metric models.Metrics) error {
 	payload, err := json.Marshal(metric)
 	if err != nil {
 		return err
 	}
+
 	body, err := gzipPayload(payload)
 	if err != nil {
 		return err
 	}
 
 	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
-		req := client.R().
+		resp, err := client.R().
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Content-Encoding", "gzip").
-			SetBody(body)
-		if key != "" {
-			req.SetHeader("HashSHA256", sha256hex(payload, key))
-		}
-		resp, err := req.Post(updatePath)
+			SetBody(body).
+			Post(updatePath)
 		if err != nil {
 			return err
 		}
@@ -124,7 +119,7 @@ func sendMetricJSON(client *resty.Client, metric models.Metrics, key string) err
 	return nil
 }
 
-func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string) error {
+func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -140,14 +135,11 @@ func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key st
 	}
 
 	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
-		req := client.R().
+		resp, err := client.R().
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Content-Encoding", "gzip").
-			SetBody(body)
-		if key != "" {
-			req.SetHeader("HashSHA256", sha256hex(payload, key))
-		}
-		resp, err := req.Post(updatesPath)
+			SetBody(body).
+			Post(updatesPath)
 		if err != nil {
 			return err
 		}
@@ -205,7 +197,7 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 }
 
 // ReportMetrics функция отправки всех фиксируемых метрик
-func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job) {
+func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string) {
 	format := normalizeReportFormat(reportFormat)
 
 	gauges, counters, err := store.Snapshot(context.Background())
@@ -220,44 +212,42 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 			return
 		}
 
-		jobs <- func() error {
-			if err = sendMetricsBatchJSON(client, metrics, key); err != nil {
-				if errors.Is(err, errBatchUnsupported) {
-					for _, metric := range metrics {
-						if err := sendMetricJSON(client, metric, key); err != nil {
-							myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
-						}
+		if err := sendMetricsBatchJSON(client, metrics); err != nil {
+			if errors.Is(err, errBatchUnsupported) {
+				for _, metric := range metrics {
+					if err := sendMetricJSON(client, metric); err != nil {
+						myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
 					}
-					return nil
 				}
-				return err
+				return
 			}
-			return nil
+
+			myLog.Log.Warn("Failed to send metrics batch", zap.Error(err))
 		}
 		return
 	}
 
 	for name, value := range gauges {
-		n := name
-		v := value.Value
-		jobs <- func() error {
-			return SendMetric(client, models.Metric{
+		if err := SendMetric(
+			client,
+			models.Metric{
 				Type:  models.MetricTypeGauge,
-				Name:  n,
-				Value: strconv.FormatFloat(v, 'f', -1, 64),
-			}, key)
+				Name:  name,
+				Value: strconv.FormatFloat(value.Value, 'f', -1, 64),
+			}); err != nil {
+			myLog.Log.Warn("Failed to send gauge", zap.Error(err))
 		}
 	}
 
 	for name, value := range counters {
-		n := name
-		v := value.Value
-		jobs <- func() error {
-			return SendMetric(client, models.Metric{
+		if err := SendMetric(
+			client,
+			models.Metric{
 				Type:  models.MetricTypeCounter,
-				Name:  n,
-				Value: strconv.FormatInt(v, 10),
-			}, key)
+				Name:  name,
+				Value: strconv.FormatInt(value.Value, 10),
+			}); err != nil {
+			myLog.Log.Warn("Failed to send counter", zap.Error(err))
 		}
 	}
 }
