@@ -20,15 +20,6 @@ func newTestClient(ts *httptest.Server) *resty.Client {
 	return resty.New().SetBaseURL(ts.URL)
 }
 
-func runJobs(jobs <-chan Job) {
-	for job := range jobs {
-		if job == nil {
-			continue
-		}
-		_ = job()
-	}
-}
-
 func TestSendMetricSuccess(t *testing.T) {
 	var receivedPath, receivedContentType string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +37,7 @@ func TestSendMetricSuccess(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 
 	if err != nil {
 		t.Fatalf("SendMetric returned error: %v", err)
@@ -72,7 +63,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 	if err == nil {
 		t.Fatalf("expected error for non-200 status")
 	}
@@ -93,7 +84,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 	if err == nil {
 		t.Fatalf("expected error from HTTP client")
 	}
@@ -125,10 +116,7 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
-	close(jobs)
-	runJobs(jobs)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -174,10 +162,7 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
-	close(jobs)
-	runJobs(jobs)
+	ReportMetrics(newTestClient(ts), store, ReportFormatPlain)
 
 	if callCount != 2 {
 		t.Fatalf("ReportMetrics should attempt both metrics even after error, got %d calls", callCount)
@@ -234,10 +219,7 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "", jobs)
-	close(jobs)
-	runJobs(jobs)
+	ReportMetrics(newTestClient(ts), store, ReportFormatJSON)
 
 	mu.Lock()
 	defer mu.Unlock()
