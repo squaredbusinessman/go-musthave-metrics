@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"bytes"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -67,43 +65,4 @@ func GzipMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(originalWriter, request)
 	})
-}
-
-func HashMiddleware(key string) Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			if key == "" {
-				next.ServeHTTP(writer, request)
-				return
-			}
-
-			// верификация
-			mustCheck := request.Method == "POST" || request.Method == "PUT" || request.Method == "PATCH" ||
-				request.ContentLength > 0 || request.Header.Get("Transfer-Encoding") != "" ||
-				request.Header.Get("HashSHA256") != ""
-
-			if mustCheck {
-				body, _ := io.ReadAll(request.Body)
-				request.Body.Close()
-				computed := sha256hex(body, key)
-				got := request.Header.Get("HashSHA256")
-				if got == "" || !strings.EqualFold(got, computed) {
-					http.Error(writer, "bad hash", http.StatusBadRequest)
-					return
-				}
-				request.Body = io.NopCloser(bytes.NewReader(body))
-			}
-
-			// запись ответа
-			rec := NewRecorder(writer)
-			next.ServeHTTP(rec, request)
-
-			if key != "" {
-				sum := sha256hex(rec.Body(), key)
-				rec.Header().Set("HashSHA256", sum)
-			}
-			rec.FlushTo(writer)
-
-		})
-	}
 }

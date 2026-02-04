@@ -46,7 +46,7 @@ func TestSendMetricSuccess(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 
 	if err != nil {
 		t.Fatalf("SendMetric returned error: %v", err)
@@ -72,7 +72,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 	if err == nil {
 		t.Fatalf("expected error for non-200 status")
 	}
@@ -93,7 +93,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
-	}, "")
+	})
 	if err == nil {
 		t.Fatalf("expected error from HTTP client")
 	}
