@@ -20,7 +20,7 @@ func main() {
 
 	cfg := parseConfig()
 
-	jobs := make(chan agent.Job, cfg.RateLimit*2)
+	jobs := make(chan agent.Job, cfg.RateLimit)
 	agent.StartWorkers(cfg.RateLimit, jobs)
 
 	store := storage.NewMemStorage()
