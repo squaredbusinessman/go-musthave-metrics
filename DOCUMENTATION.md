@@ -109,16 +109,10 @@
   - Выход: `error` при сетевых/HTTP ошибках.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
-- `func sendMetricJSON(client *resty.Client, metric models.Metrics, key string) error`
-  - Отправляет одну метрику в JSON (gzip) на `/update`.
-  - Вход: REST клиент, структура `Metrics`, ключ подписи.
-  - Выход: `error` при сетевых/HTTP ошибках.
-  - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
-
 - `func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string) error`
   - Отправляет батч метрик в JSON (gzip) на `/updates`.
   - Вход: REST клиент, список `Metrics`, ключ подписи.
-  - Выход: `error` при сетевых/HTTP ошибках; `errBatchUnsupported` при 404/405.
+  - Выход: `error` при сетевых/HTTP ошибках.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
 - `func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job)`

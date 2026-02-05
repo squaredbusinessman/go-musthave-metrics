@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"path"
 	"strconv"
@@ -28,8 +27,6 @@ const (
 	updatePath        = "/update"
 	updatesPath       = "/updates"
 )
-
-var errBatchUnsupported = errors.New("batch updates not supported")
 
 func normalizeReportFormat(format string) string {
 	switch strings.ToLower(format) {
@@ -90,40 +87,6 @@ func SendMetric(client *resty.Client, m models.Metric, key string) error {
 	return nil
 }
 
-func sendMetricJSON(client *resty.Client, metric models.Metrics, key string) error {
-	payload, err := json.Marshal(metric)
-	if err != nil {
-		return err
-	}
-	body, err := gzipPayload(payload)
-	if err != nil {
-		return err
-	}
-
-	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
-		req := client.R().
-			SetHeader("Content-Type", "application/json").
-			SetHeader("Content-Encoding", "gzip").
-			SetBody(body)
-		if key != "" {
-			req.SetHeader("HashSHA256", sha256hex(payload, key))
-		}
-		resp, err := req.Post(updatePath)
-		if err != nil {
-			return err
-		}
-		if !resp.IsSuccess() {
-			return fmt.Errorf("bad status: %s", resp.Status())
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	myLog.Log.Info("Metric sent", zap.String("metric", metric.ID), zap.String("format", ReportFormatJSON))
-	return nil
-}
-
 func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string) error {
 	if len(metrics) == 0 {
 		return nil
@@ -152,16 +115,10 @@ func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key st
 			return err
 		}
 
-		if resp.IsSuccess() {
-			return nil
-		}
-
-		switch resp.StatusCode() {
-		case http.StatusNotFound, http.StatusMethodNotAllowed:
-			return errBatchUnsupported
-		default:
+		if !resp.IsSuccess() {
 			return fmt.Errorf("bad status: %s", resp.Status())
 		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -221,18 +178,7 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 		}
 
 		jobs <- func() error {
-			if err = sendMetricsBatchJSON(client, metrics, key); err != nil {
-				if errors.Is(err, errBatchUnsupported) {
-					for _, metric := range metrics {
-						if err := sendMetricJSON(client, metric, key); err != nil {
-							myLog.Log.Warn("Failed to send metric (fallback)", zap.Error(err))
-						}
-					}
-					return nil
-				}
-				return err
-			}
-			return nil
+			return sendMetricsBatchJSON(client, metrics, key)
 		}
 		return
 	}
