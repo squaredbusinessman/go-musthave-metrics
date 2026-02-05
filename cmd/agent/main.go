@@ -46,9 +46,9 @@ func main() {
 		ticker := time.NewTicker(time.Duration(cfg.PollInterval) * time.Second)
 		defer ticker.Stop()
 
-		agent.ColletGopsutilMetrics(store)
+		agent.ColleсtGopsutilMetrics(store)
 		for range ticker.C {
-			agent.ColletGopsutilMetrics(store)
+			agent.ColleсtGopsutilMetrics(store)
 		}
 	}()
 

@@ -10,7 +10,7 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-func ColletGopsutilMetrics(store *storage.MemStorage) {
+func ColleсtGopsutilMetrics(store *storage.MemStorage) {
 	ctx := context.Background()
 
 	vm, err := mem.VirtualMemory()
