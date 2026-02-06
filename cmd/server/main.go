@@ -118,7 +118,7 @@ func main() {
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
-	err := http.ListenAndServe(cfg.Server.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.GzipMiddleware))
+	err := http.ListenAndServe(cfg.Server.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.HashMiddleware(cfg.Server.Key), middleware.GzipMiddleware))
 	if stopStore != nil {
 		close(stopStore)
 		if err := fileStorage.Save(); err != nil {

@@ -21,6 +21,7 @@ type DBConfig struct {
 type ServerConfig struct {
 	RunAddr  string `env:"ADDRESS"`
 	LogLevel string `env:"LOG_LEVEL"`
+	Key      string `env:"KEY"`
 }
 
 type StorageConfig struct {
@@ -46,6 +47,7 @@ func parseConfig() Config {
 
 	flag.StringVar(&cfg.Server.RunAddr, "a", cfg.Server.RunAddr, "Run server address")
 	flag.StringVar(&cfg.Server.LogLevel, "l", cfg.Server.LogLevel, "log level")
+	flag.StringVar(&cfg.Server.Key, "k", "", "Hash key")
 	flag.IntVar(&cfg.Storage.StoreInterval, "i", cfg.Storage.StoreInterval, "store interval in seconds (0 for sync)")
 	flag.StringVar(&cfg.Storage.FileStoragePath, "f", cfg.Storage.FileStoragePath, "file storage path")
 	flag.BoolVar(&cfg.Storage.Restore, "r", cfg.Storage.Restore, "restore metrics from file on startup")

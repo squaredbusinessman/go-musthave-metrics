@@ -20,29 +20,48 @@ func main() {
 
 	cfg := parseConfig()
 
+	jobs := make(chan agent.Job, cfg.RateLimit)
+	agent.StartWorkers(cfg.RateLimit, jobs)
+
 	store := storage.NewMemStorage()
 	randS := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	pollDuration := time.Duration(cfg.PollInterval) * time.Second
-	pollTicker := time.NewTicker(pollDuration)
-	defer pollTicker.Stop()
-
-	reportDuration := time.Duration(cfg.ReportInterval) * time.Second
-	reportTicker := time.NewTicker(reportDuration)
-	defer reportTicker.Stop()
-
-	agent.CollectRuntimeMetrics(store, randS)
 
 	client := resty.New().
 		SetBaseURL("http://" + cfg.Addr).
 		SetTimeout(5 * time.Second)
 
-	for {
-		select {
-		case <-pollTicker.C:
+	// горутина фиксации рантайм-метрик
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.PollInterval) * time.Second)
+		defer ticker.Stop()
+
+		agent.CollectRuntimeMetrics(store, randS)
+		for range ticker.C {
 			agent.CollectRuntimeMetrics(store, randS)
-		case <-reportTicker.C:
-			agent.ReportMetrics(client, store, cfg.ReportFormat)
 		}
-	}
+	}()
+
+	// горутина фиксация gopsutil метрик
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.PollInterval) * time.Second)
+		defer ticker.Stop()
+
+		agent.ColleсtGopsutilMetrics(store)
+		for range ticker.C {
+			agent.ColleсtGopsutilMetrics(store)
+		}
+	}()
+
+	// горутина отправка метрик
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.ReportInterval) * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			agent.ReportMetrics(client, store, cfg.ReportFormat, cfg.Key, jobs)
+		}
+	}()
+
+	// блокировка main
+	select {}
 }
