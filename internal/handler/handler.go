@@ -1,14 +1,18 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
@@ -30,12 +34,15 @@ const (
 type Handler struct {
 	ms service.MetricsService
 	db DBPinger
+	// Аудит зависим от HTTP-запроса, потому что только здесь есть IP клиента.
+	auditor audit.Notifier
 }
 
-func New(ms service.MetricsService, db DBPinger) *Handler {
+func New(ms service.MetricsService, db DBPinger, auditor audit.Notifier) *Handler {
 	return &Handler{
-		ms: ms,
-		db: db,
+		ms:      ms,
+		db:      db,
+		auditor: auditor,
 	}
 }
 
@@ -85,6 +92,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 		apperr.WriteServiceError(w, err)
 		return
 	}
+	h.publishAudit(r, []string{m.Name})
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -127,6 +135,7 @@ func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
+	h.publishAudit(request, []string{req.ID})
 	writer.Header().Set("Content-Type", contentAppJSON)
 	writer.WriteHeader(http.StatusOK)
 	if err = json.NewEncoder(writer).Encode(storedMetric); err != nil {
@@ -166,6 +175,7 @@ func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	h.publishAudit(request, metricNames(req))
 	writer.WriteHeader(http.StatusOK)
 }
 
@@ -263,4 +273,61 @@ func (h *Handler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintf(w, "</table></body></html>")
+}
+
+func (h *Handler) publishAudit(request *http.Request, metrics []string) {
+	if h.auditor == nil || len(metrics) == 0 {
+		return
+	}
+
+	event := audit.Event{
+		TS:        time.Now().Unix(),
+		Metrics:   append([]string(nil), metrics...),
+		IPAddress: requestIP(request),
+	}
+
+	// Основной запрос уже успешно обработан.
+	// Аудит отправляем отдельно и не роняем из-за него ответ клиенту.
+	ctx := context.WithoutCancel(request.Context())
+	if err := h.auditor.Notify(ctx, event); err != nil {
+		logger.Log.Error("audit notify failure",
+			zap.Error(err),
+			zap.Strings("metrics", event.Metrics),
+			zap.String("ip_address", event.IPAddress),
+		)
+	}
+}
+
+func metricNames(metrics []models.Metrics) []string {
+	names := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		names = append(names, metric.ID)
+	}
+	return names
+}
+
+func requestIP(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+
+	// Если сервер стоит за прокси, сначала берём адрес из заголовков.
+	if ip := strings.TrimSpace(request.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+
+	if forwarded := strings.TrimSpace(request.Header.Get("X-Forwarded-For")); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	// Иначе остаётся адрес TCP-соединения.
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err == nil {
+		return host
+	}
+
+	return request.RemoteAddr
 }

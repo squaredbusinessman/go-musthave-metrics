@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
@@ -41,11 +43,23 @@ type mockMetricsService struct {
 	allErr       error
 }
 
+type mockAuditor struct {
+	notifyCalled bool
+	event        audit.Event
+	err          error
+}
+
 func newMockMetricsService() *mockMetricsService {
 	return &mockMetricsService{
 		gauges:   make(map[string]models.Gauge),
 		counters: make(map[string]models.Counter),
 	}
+}
+
+func (m *mockAuditor) Notify(ctx context.Context, event audit.Event) error {
+	m.notifyCalled = true
+	m.event = event
+	return m.err
 }
 
 func (m *mockMetricsService) UpdateMetric(ctx context.Context, metric models.Metric) error {
@@ -198,11 +212,13 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			h := New(svc, nil)
+			auditor := &mockAuditor{}
+			h := New(svc, nil, auditor)
 			r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
 
 			req := httptest.NewRequest(tt.args.method, tt.args.target, strings.NewReader(tt.args.body))
 			req.Header.Set("Content-Type", "text/plain")
+			req.RemoteAddr = "192.168.0.42:1234"
 			w := httptest.NewRecorder()
 
 			r.ServeHTTP(w, req)
@@ -219,6 +235,23 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 				if svc.updatedMetric != *tt.wantMetric {
 					t.Fatalf("metric = %+v, want %+v", svc.updatedMetric, *tt.wantMetric)
 				}
+			}
+
+			if tt.wantCode == http.StatusOK {
+				if !auditor.notifyCalled {
+					t.Fatalf("expected audit event to be sent")
+				}
+				if auditor.event.IPAddress != "192.168.0.42" {
+					t.Fatalf("ip = %q, want %q", auditor.event.IPAddress, "192.168.0.42")
+				}
+				if len(auditor.event.Metrics) != 1 || auditor.event.Metrics[0] != tt.wantMetric.Name {
+					t.Fatalf("metrics = %+v, want [%q]", auditor.event.Metrics, tt.wantMetric.Name)
+				}
+				if auditor.event.TS == 0 {
+					t.Fatalf("expected non-zero audit timestamp")
+				}
+			} else if auditor.notifyCalled {
+				t.Fatalf("did not expect audit event on non-OK response")
 			}
 		})
 	}
@@ -282,7 +315,7 @@ func TestGetMetric(t *testing.T) {
 			}
 
 			r := chi.NewRouter()
-			h := New(svc, nil)
+			h := New(svc, nil, nil)
 			r.Get("/value/{type}/{name}", h.GetMetric)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
@@ -315,7 +348,7 @@ func TestGetAllMetrics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
-	h := New(svc, nil)
+	h := New(svc, nil, nil)
 	http.HandlerFunc(h.GetAllMetrics).ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -331,5 +364,67 @@ func TestGetAllMetrics(t *testing.T) {
 
 	if !svc.getAllCalled {
 		t.Fatalf("expected GetAllMetrics to be called")
+	}
+}
+
+func TestUpdateMetricsBatchAudit(t *testing.T) {
+	svc := newMockMetricsService()
+	auditor := &mockAuditor{}
+	h := New(svc, nil, auditor)
+
+	body := `[{"id":"Alloc","type":"gauge","value":42.5},{"id":"PollCount","type":"counter","delta":3}]`
+	req := httptest.NewRequest(http.MethodPost, "/updates", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
+	w := httptest.NewRecorder()
+
+	http.HandlerFunc(h.UpdateMetricsBatch).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !auditor.notifyCalled {
+		t.Fatalf("expected audit event to be sent")
+	}
+	if got, want := auditor.event.IPAddress, "203.0.113.10"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
+	}
+	if got, want := auditor.event.Metrics, []string{"Alloc", "PollCount"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("metrics = %+v, want %+v", got, want)
+	}
+}
+
+func TestUpdateMetricJSONAudit(t *testing.T) {
+	svc := newMockMetricsService()
+	auditor := &mockAuditor{}
+	h := New(svc, nil, auditor)
+
+	value := 42.5
+	resp := &models.Metrics{ID: "Alloc", MType: models.MetricTypeGauge, Value: &value}
+	svc.metricJSONResp = resp
+
+	body, err := json.Marshal(models.Metrics{ID: "Alloc", MType: models.MetricTypeGauge, Value: &value})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Real-IP", "198.51.100.7")
+	w := httptest.NewRecorder()
+
+	http.HandlerFunc(h.UpdateMetricJSON).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%q", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !auditor.notifyCalled {
+		t.Fatalf("expected audit event to be sent")
+	}
+	if got, want := auditor.event.IPAddress, "198.51.100.7"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
+	}
+	if got, want := auditor.event.Metrics, []string{"Alloc"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("metrics = %+v, want %+v", got, want)
 	}
 }

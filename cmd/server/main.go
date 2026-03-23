@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
@@ -76,7 +77,28 @@ func main() {
 	}
 
 	metricsService := service.NewMetricsService(store, serviceOpts...)
-	h := handler.New(metricsService, dbPool)
+
+	var auditObservers []audit.Observer
+	// Аудит собирается как набор независимых приёмников.
+	// Это даёт возможность писать сразу и в файл, и во внешний HTTP endpoint.
+	if cfg.Audit.FilePath != "" {
+		auditObservers = append(auditObservers, audit.NewFileObserver(cfg.Audit.FilePath))
+	}
+	if cfg.Audit.URL != "" {
+		httpObserver, err := audit.NewHTTPObserver(cfg.Audit.URL, nil)
+		if err != nil {
+			log.Fatalf("audit http observer init failure: %v", err)
+		}
+		auditObservers = append(auditObservers, httpObserver)
+	}
+
+	var auditNotifier audit.Notifier
+	if len(auditObservers) > 0 {
+		auditNotifier = audit.NewPublisher(auditObservers...)
+	}
+
+	// Хендлер знает HTTP-контекст запроса, поэтому именно там удобно собирать событие аудита.
+	h := handler.New(metricsService, dbPool, auditNotifier)
 
 	var stopStore chan struct{}
 	if fileStorage != nil && cfg.Storage.StoreInterval > 0 {
