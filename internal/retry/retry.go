@@ -11,10 +11,7 @@ var backoffs = []time.Duration{
 	5 * time.Second,
 }
 
-// Do запускает механизм ретраев для необходимых ошибок
-// (подключение к серверу (сетевой/транспортный сбой) и
-// ошибка класса 08 в постгре (Connection Exception),
-// повторять до 3 раз с паузами 1s, 3s, 5s) по заранее фиксированному расписанию.
+// Do - выполняет операцию с повторными попытками по фиксированному расписанию.
 func Do(ctx context.Context, isRetryable func(error) bool, op func() error) error {
 	if ctx == nil {
 		ctx = context.Background()

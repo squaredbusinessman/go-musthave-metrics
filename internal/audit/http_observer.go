@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// HTTPObserver - отправляет события аудита во внешний HTTP endpoint.
 type HTTPObserver struct {
 	targetURL string
 	client    *http.Client
 }
 
+// NewHTTPObserver - создает HTTP-приемник аудита.
 func NewHTTPObserver(targetURL string, client *http.Client) (*HTTPObserver, error) {
 	if _, err := url.ParseRequestURI(targetURL); err != nil {
 		return nil, fmt.Errorf("invalid audit url: %w", err)
@@ -31,6 +33,7 @@ func NewHTTPObserver(targetURL string, client *http.Client) (*HTTPObserver, erro
 	}, nil
 }
 
+// Notify - отправляет событие аудита HTTP POST-запросом.
 func (o *HTTPObserver) Notify(ctx context.Context, event Event) error {
 	payload, err := json.Marshal(event)
 	if err != nil {

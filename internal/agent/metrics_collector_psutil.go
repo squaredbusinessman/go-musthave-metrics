@@ -10,6 +10,7 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+// ColleсtGopsutilMetrics - собирает системные метрики через gopsutil.
 func ColleсtGopsutilMetrics(store *storage.MemStorage) {
 	ctx := context.Background()
 

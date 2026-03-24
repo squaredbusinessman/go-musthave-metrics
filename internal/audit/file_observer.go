@@ -8,15 +8,18 @@ import (
 	"sync"
 )
 
+// FileObserver - пишет события аудита в файл построчным JSON.
 type FileObserver struct {
 	path string
 	mu   sync.Mutex
 }
 
+// NewFileObserver - создает файловый приемник аудита.
 func NewFileObserver(path string) *FileObserver {
 	return &FileObserver{path: path}
 }
 
+// Notify - сохраняет событие аудита в файл.
 func (o *FileObserver) Notify(ctx context.Context, event Event) error {
 	select {
 	case <-ctx.Done():

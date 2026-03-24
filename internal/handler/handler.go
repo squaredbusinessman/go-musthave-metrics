@@ -31,6 +31,7 @@ const (
 	contentTypeHTML      = "text/html; charset=utf-8"
 )
 
+// Handler - набор HTTP-хендлеров сервиса метрик.
 type Handler struct {
 	ms service.MetricsService
 	db DBPinger
@@ -38,6 +39,7 @@ type Handler struct {
 	auditor audit.Notifier
 }
 
+// New - создает Handler с зависимостями сервиса, БД и аудита.
 func New(ms service.MetricsService, db DBPinger, auditor audit.Notifier) *Handler {
 	return &Handler{
 		ms:      ms,
@@ -57,7 +59,7 @@ func isJSONContentType(value string) bool {
 	return mediaType == contentAppJSON
 }
 
-// AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
+// AcceptMetricsToStorage - принимает метрику из URL и сохраняет ее в хранилище.
 func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -96,6 +98,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 }
 
+// UpdateMetricJSON - обновляет одну метрику из JSON-запроса.
 func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -143,6 +146,7 @@ func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Req
 	}
 }
 
+// UpdateMetricsBatch - обновляет несколько метрик одним JSON-запросом.
 func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -179,6 +183,7 @@ func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.R
 	writer.WriteHeader(http.StatusOK)
 }
 
+// GetMetric - возвращает значение метрики в текстовом виде.
 func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -206,6 +211,7 @@ func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, value)
 }
 
+// GetMetricJSON - возвращает значение метрики в JSON-виде.
 func (h *Handler) GetMetricJSON(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -245,6 +251,7 @@ func (h *Handler) GetMetricJSON(writer http.ResponseWriter, request *http.Reques
 	}
 }
 
+// GetAllMetrics - отдает HTML-страницу со всеми доступными метриками.
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)

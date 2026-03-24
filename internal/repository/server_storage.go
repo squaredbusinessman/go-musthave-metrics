@@ -9,8 +9,10 @@ import (
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
+// ErrNotFound - метрика не найдена в хранилище.
 var ErrNotFound = errors.New("metric not found")
 
+// Storage - общий интерфейс хранилища метрик.
 type Storage interface {
 	SetGauge(ctx context.Context, name string, value models.Gauge) error
 	AddCounter(ctx context.Context, name string, value int64) error
@@ -20,6 +22,7 @@ type Storage interface {
 	UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error
 }
 
+// MemStorage - in-memory хранилище метрик.
 type MemStorage struct {
 	mutex sync.RWMutex
 	models.Gauge
@@ -28,6 +31,7 @@ type MemStorage struct {
 	counters map[string]models.Counter
 }
 
+// NewMemStorage - создает пустое хранилище в памяти.
 func NewMemStorage() *MemStorage {
 	return &MemStorage{
 		gauges:   make(map[string]models.Gauge),
@@ -35,7 +39,7 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
-// SetGauge Фиксация изменения конкретной метрики
+// SetGauge - сохраняет значение gauge-метрики.
 func (ms *MemStorage) SetGauge(ctx context.Context, name string, value models.Gauge) error {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
@@ -43,7 +47,7 @@ func (ms *MemStorage) SetGauge(ctx context.Context, name string, value models.Ga
 	return nil
 }
 
-// AddCounter Устанавливает значение счетчика
+// AddCounter - увеличивает значение counter-метрики.
 func (ms *MemStorage) AddCounter(ctx context.Context, name string, value int64) error {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
@@ -53,6 +57,7 @@ func (ms *MemStorage) AddCounter(ctx context.Context, name string, value int64) 
 	return nil
 }
 
+// GetGauge - возвращает значение gauge-метрики.
 func (ms *MemStorage) GetGauge(ctx context.Context, name string) (float64, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
@@ -63,6 +68,7 @@ func (ms *MemStorage) GetGauge(ctx context.Context, name string) (float64, error
 	return g.Value, nil
 }
 
+// GetCounter - возвращает значение counter-метрики.
 func (ms *MemStorage) GetCounter(ctx context.Context, name string) (int64, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
@@ -73,7 +79,7 @@ func (ms *MemStorage) GetCounter(ctx context.Context, name string) (int64, error
 	return c.Value, nil
 }
 
-// Snapshot - метод фиксации "снимка" карты метрик для передачи на сервер. Копируем значения мапы для потокобезопасности
+// Snapshot - возвращает копию текущих метрик для безопасного чтения.
 func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
@@ -91,6 +97,7 @@ func (ms *MemStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, ma
 	return gaugesCopy, countersCopy, nil
 }
 
+// UpdateMetricsBatch - обновляет набор метрик под одной блокировкой.
 func (ms *MemStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
 	if len(metrics) == 0 {
 		return nil

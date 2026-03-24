@@ -9,6 +9,7 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
+// Config - итоговая конфигурация сервера.
 type Config struct {
 	Server   ServerConfig
 	Storage  StorageConfig
@@ -16,16 +17,19 @@ type Config struct {
 	Audit    AuditConfig
 }
 
+// DBConfig - настройки подключения к PostgreSQL.
 type DBConfig struct {
 	DSN string `env:"DATABASE_DSN"`
 }
 
+// ServerConfig - сетевые и общие настройки HTTP-сервера.
 type ServerConfig struct {
 	RunAddr  string `env:"ADDRESS"`
 	LogLevel string `env:"LOG_LEVEL"`
 	Key      string `env:"KEY"`
 }
 
+// StorageConfig - настройки файлового хранилища метрик.
 type StorageConfig struct {
 	StoreInterval      int `env:"STORE_INTERVAL"`
 	FileStorageEnabled bool
@@ -33,6 +37,7 @@ type StorageConfig struct {
 	Restore            bool   `env:"RESTORE"`
 }
 
+// AuditConfig - настройки приемников аудита.
 type AuditConfig struct {
 	FilePath string `env:"AUDIT_FILE"`
 	URL      string `env:"AUDIT_URL"`

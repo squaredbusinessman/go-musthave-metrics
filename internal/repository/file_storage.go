@@ -13,8 +13,10 @@ import (
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
+// ErrFileStoragePathEmpty - путь к файлу хранилища не задан.
 var ErrFileStoragePathEmpty = errors.New("file storage path is empty")
 
+// FileStorage - файловая персистентность для метрик.
 type FileStorage struct {
 	path  string
 	store Storage
@@ -27,6 +29,7 @@ type storageMetricRecord struct {
 	Value float64 `json:"value,omitempty"`
 }
 
+// NewFileStorage - создает файловое хранилище поверх основного Storage.
 func NewFileStorage(path string, store Storage) *FileStorage {
 	return &FileStorage{
 		path:  path,
@@ -34,6 +37,7 @@ func NewFileStorage(path string, store Storage) *FileStorage {
 	}
 }
 
+// Save - сохраняет текущие метрики в файл.
 func (fs *FileStorage) Save() error {
 	if fs.path == "" {
 		return ErrFileStoragePathEmpty
@@ -80,6 +84,7 @@ func (fs *FileStorage) Save() error {
 	return nil
 }
 
+// Restore - загружает метрики из файла в основное хранилище.
 func (fs *FileStorage) Restore() error {
 	ctx := context.Background()
 

@@ -9,7 +9,7 @@ import (
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
-// CollectRuntimeMetrics Функция сбора метрик агентского пакета
+// CollectRuntimeMetrics - собирает runtime-метрики и обновляет PollCount.
 func CollectRuntimeMetrics(store *storage.MemStorage, rnd *rand.Rand) {
 	var stats runtime.MemStats
 	ctx := context.Background()

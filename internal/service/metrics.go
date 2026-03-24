@@ -10,6 +10,7 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+// MetricsService - бизнес-логика работы с метриками.
 type MetricsService interface {
 	UpdateMetric(ctx context.Context, m models.Metric) error
 	UpdateMetricJSON(ctx context.Context, m models.Metrics) error
@@ -24,14 +25,17 @@ type metricsService struct {
 	afterUpdate func()
 }
 
+// MetricsServiceOption - опция настройки metricsService.
 type MetricsServiceOption func(*metricsService)
 
+// WithAfterUpdate - добавляет хук, который вызывается после успешного обновления метрик.
 func WithAfterUpdate(hook func()) MetricsServiceOption {
 	return func(ms *metricsService) {
 		ms.afterUpdate = hook
 	}
 }
 
+// NewMetricsService - создает сервис метрик поверх репозитория.
 func NewMetricsService(store repository.Storage, opts ...MetricsServiceOption) MetricsService {
 	service := &metricsService{
 		store: store,
@@ -42,7 +46,7 @@ func NewMetricsService(store repository.Storage, opts ...MetricsServiceOption) M
 	return service
 }
 
-// UpdateMetric логика обновления метрик на сервере
+// UpdateMetric - обновляет метрику из строкового представления.
 func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) error {
 	switch m.Type {
 	case models.MetricTypeGauge:
@@ -76,6 +80,7 @@ func (s *metricsService) UpdateMetric(ctx context.Context, m models.Metric) erro
 	}
 }
 
+// UpdateMetricJSON - обновляет метрику из JSON-представления.
 func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics) error {
 	switch m.MType {
 	case models.MetricTypeGauge:
@@ -102,6 +107,7 @@ func (s *metricsService) UpdateMetricJSON(ctx context.Context, m models.Metrics)
 	}
 }
 
+// UpdateMetricsBatch - атомарно обновляет набор метрик.
 func (s *metricsService) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
 	if err := s.store.UpdateMetricsBatch(ctx, metrics); err != nil {
 		return err
@@ -112,7 +118,7 @@ func (s *metricsService) UpdateMetricsBatch(ctx context.Context, metrics []model
 	return nil
 }
 
-// GetMetric получение одной метрики, выводим строку для удобства использования в HTTP
+// GetMetric - возвращает одну метрику в строковом виде для HTTP-ответа.
 func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string, error) {
 	switch m.Type {
 	case models.MetricTypeGauge:
@@ -139,6 +145,7 @@ func (s *metricsService) GetMetric(ctx context.Context, m models.Metric) (string
 	}
 }
 
+// GetMetricJSON - возвращает одну метрику в JSON-представлении.
 func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*models.Metrics, error) {
 	resp := models.Metrics{
 		ID:    m.ID,
@@ -172,7 +179,7 @@ func (s *metricsService) GetMetricJSON(ctx context.Context, m models.Metrics) (*
 	return &resp, nil
 }
 
-// GetAllMetrics снимок метрик зафиксированных в репозитории
+// GetAllMetrics - возвращает снимок всех сохраненных метрик.
 func (s *metricsService) GetAllMetrics(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	g, c, err := s.store.Snapshot(ctx)
 	if err != nil {

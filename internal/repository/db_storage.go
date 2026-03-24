@@ -14,10 +14,12 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/retry"
 )
 
+// DBStorage - хранилище метрик в PostgreSQL.
 type DBStorage struct {
 	pool *pgxpool.Pool
 }
 
+// NewDBStorage - создает PostgreSQL-хранилище.
 func NewDBStorage(pool *pgxpool.Pool) *DBStorage {
 	return &DBStorage{
 		pool: pool,
@@ -68,6 +70,7 @@ func buildSnapshotCounters() (string, []interface{}, error) {
 		ToSql()
 }
 
+// SetGauge - сохраняет значение gauge-метрики в базе.
 func (db *DBStorage) SetGauge(ctx context.Context, name string, value models.Gauge) error {
 	return retry.Do(ctx, isRetryablePGErr, func() error {
 		sql, args, err := buildUpsertGauge(name, value.Value)
@@ -79,6 +82,7 @@ func (db *DBStorage) SetGauge(ctx context.Context, name string, value models.Gau
 	})
 }
 
+// AddCounter - увеличивает значение counter-метрики в базе.
 func (db *DBStorage) AddCounter(ctx context.Context, name string, value int64) error {
 	return retry.Do(ctx, isRetryablePGErr, func() error {
 		sql, args, err := buildUpsertCounter(name, value)
@@ -90,6 +94,7 @@ func (db *DBStorage) AddCounter(ctx context.Context, name string, value int64) e
 	})
 }
 
+// GetGauge - читает значение gauge-метрики из базы.
 func (db *DBStorage) GetGauge(ctx context.Context, name string) (float64, error) {
 	var v float64
 	err := retry.Do(ctx, isRetryablePGErr, func() error {
@@ -108,6 +113,7 @@ func (db *DBStorage) GetGauge(ctx context.Context, name string) (float64, error)
 	return v, nil
 }
 
+// GetCounter - читает значение counter-метрики из базы.
 func (db *DBStorage) GetCounter(ctx context.Context, name string) (int64, error) {
 	var v int64
 	err := retry.Do(ctx, isRetryablePGErr, func() error {
@@ -126,6 +132,7 @@ func (db *DBStorage) GetCounter(ctx context.Context, name string) (int64, error)
 	return v, nil
 }
 
+// Snapshot - возвращает все метрики из базы одним снимком.
 func (db *DBStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map[string]models.Counter, error) {
 	var gauges map[string]models.Gauge
 	var counters map[string]models.Counter
@@ -189,6 +196,7 @@ func (db *DBStorage) Snapshot(ctx context.Context) (map[string]models.Gauge, map
 	return gauges, counters, nil
 }
 
+// UpdateMetricsBatch - обновляет набор метрик в одной транзакции.
 func (db *DBStorage) UpdateMetricsBatch(ctx context.Context, metrics []models.Metrics) error {
 	for _, m := range metrics {
 		switch m.MType {

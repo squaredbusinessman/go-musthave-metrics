@@ -22,10 +22,12 @@ import (
 )
 
 const (
+	// ReportFormatPlain - отправка метрик через строковые эндпоинты.
 	ReportFormatPlain = "plain"
-	ReportFormatJSON  = "json"
-	updatePath        = "/update"
-	updatesPath       = "/updates"
+	// ReportFormatJSON - отправка метрик через JSON-эндпоинты.
+	ReportFormatJSON = "json"
+	updatePath       = "/update"
+	updatesPath      = "/updates"
 )
 
 func normalizeReportFormat(format string) string {
@@ -57,7 +59,7 @@ func isRetryableNetErr(err error) bool {
 	return errors.As(err, &urlErr)
 }
 
-// SendMetric отправляет одну метрику по пути /update/{type}/{name}/{value}.
+// SendMetric - отправляет одну метрику по пути /update/{type}/{name}/{value}.
 func SendMetric(client *resty.Client, m models.Metric, key string) error {
 	postPath := path.Join("update", m.Type, m.Name, m.Value)
 
@@ -161,7 +163,7 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 	return metrics
 }
 
-// ReportMetrics функция отправки всех фиксируемых метрик
+// ReportMetrics - ставит в очередь отправку всех накопленных метрик.
 func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job) {
 	format := normalizeReportFormat(reportFormat)
 
