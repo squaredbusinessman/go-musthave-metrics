@@ -19,6 +19,29 @@ import (
 	"go.uber.org/zap"
 )
 
+func buildRouter(h *handler.Handler, key string) http.Handler {
+	r := chi.NewRouter()
+	r.Use(chiMiddleware.StripSlashes)
+
+	// пишем метрики
+	r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
+	// новый эндпоинт для фиксации данных приходящих как JSON
+	r.Post("/update", h.UpdateMetricJSON)
+	// батч-обновление метрик
+	r.Post("/updates", h.UpdateMetricsBatch)
+	r.Post("/updates/", h.UpdateMetricsBatch)
+	// смотрим метрики
+	r.Get("/", h.GetAllMetrics)
+	r.Get("/value/{type}/{name}", h.GetMetric)
+	// получаем JSON со значением метрики из бд
+	r.Post("/value", h.GetMetricJSON)
+	r.Post("/value/", h.GetMetricJSON)
+	// проверка соединения с БД
+	r.Get("/ping", h.Ping)
+
+	return middleware.Conveyor(r, middleware.RequestLogger, middleware.HashMiddleware(key), middleware.GzipMiddleware)
+}
+
 func main() {
 	// обработка аргументов командной строки
 	cfg := parseConfig()
@@ -119,28 +142,11 @@ func main() {
 		}()
 	}
 
-	r := chi.NewRouter()
-	r.Use(chiMiddleware.StripSlashes)
-
-	// пишем метрики
-	r.Post("/update/{type}/{name}/{value}", h.AcceptMetricsToStorage)
-	// новый эндпоинт для фиксации данных приходящих как JSON
-	r.Post("/update", h.UpdateMetricJSON)
-	// батч-обновление метрик
-	r.Post("/updates", h.UpdateMetricsBatch)
-	r.Post("/updates/", h.UpdateMetricsBatch)
-	// смотрим метрики
-	r.Get("/", h.GetAllMetrics)
-	r.Get("/value/{type}/{name}", h.GetMetric)
-	// получаем JSON со значением метрики из бд
-	r.Post("/value", h.GetMetricJSON)
-	r.Post("/value/", h.GetMetricJSON)
-	// проверка соединения с БД
-	r.Get("/ping", h.Ping)
+	router := buildRouter(h, cfg.Server.Key)
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
-	err := http.ListenAndServe(cfg.Server.RunAddr, middleware.Conveyor(r, middleware.RequestLogger, middleware.HashMiddleware(cfg.Server.Key), middleware.GzipMiddleware))
+	err := http.ListenAndServe(cfg.Server.RunAddr, router)
 	if stopStore != nil {
 		close(stopStore)
 		if err := fileStorage.Save(); err != nil {
