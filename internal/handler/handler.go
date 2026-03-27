@@ -85,7 +85,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	}
 
 	if m.Type == "" || m.Name == "" || m.Value == "" {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 

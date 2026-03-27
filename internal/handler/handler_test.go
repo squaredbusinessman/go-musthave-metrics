@@ -257,6 +257,24 @@ func TestAcceptMetricsToStorage(t *testing.T) {
 	}
 }
 
+func TestAcceptMetricsToStorageBadRequestOnMissingParams(t *testing.T) {
+	svc := newMockMetricsService()
+	h := New(svc, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/update", nil)
+	req.Header.Set("Content-Type", "text/plain")
+	w := httptest.NewRecorder()
+
+	h.AcceptMetricsToStorage(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %q", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if svc.updateCalled {
+		t.Fatal("did not expect service update on bad request")
+	}
+}
+
 func TestGetMetric(t *testing.T) {
 	tests := []struct {
 		name         string
