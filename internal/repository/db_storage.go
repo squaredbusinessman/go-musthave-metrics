@@ -28,7 +28,7 @@ func NewDBStorage(pool *pgxpool.Pool) *DBStorage {
 
 var psql = squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 
-func buildUpsertGauge(name string, value float64) (string, []interface{}, error) {
+func buildUpsertGauge(name string, value float64) (string, []any, error) {
 	return psql.Insert("gauges").
 		Columns("metric_name", "value").
 		Values(name, value).
@@ -36,7 +36,7 @@ func buildUpsertGauge(name string, value float64) (string, []interface{}, error)
 		ToSql()
 }
 
-func buildUpsertCounter(name string, value int64) (string, []interface{}, error) {
+func buildUpsertCounter(name string, value int64) (string, []any, error) {
 	return psql.Insert("counters").
 		Columns("metric_name", "value").
 		Values(name, value).
@@ -44,27 +44,27 @@ func buildUpsertCounter(name string, value int64) (string, []interface{}, error)
 		ToSql()
 }
 
-func buildGetGauge(name string) (string, []interface{}, error) {
+func buildGetGauge(name string) (string, []any, error) {
 	return psql.Select("value").
 		From("gauges").
 		Where(squirrel.Eq{"metric_name": name}).
 		ToSql()
 }
 
-func buildGetCounter(name string) (string, []interface{}, error) {
+func buildGetCounter(name string) (string, []any, error) {
 	return psql.Select("value").
 		From("counters").
 		Where(squirrel.Eq{"metric_name": name}).
 		ToSql()
 }
 
-func buildSnapshotGauges() (string, []interface{}, error) {
+func buildSnapshotGauges() (string, []any, error) {
 	return psql.Select("metric_name", "value").
 		From("gauges").
 		ToSql()
 }
 
-func buildSnapshotCounters() (string, []interface{}, error) {
+func buildSnapshotCounters() (string, []any, error) {
 	return psql.Select("metric_name", "value").
 		From("counters").
 		ToSql()
