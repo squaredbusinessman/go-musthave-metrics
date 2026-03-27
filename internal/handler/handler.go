@@ -72,7 +72,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	}
 
 	m := models.Metric{
-		Type:  chi.URLParam(r, urlParamType),
+		Type:  models.MetricType(chi.URLParam(r, urlParamType)),
 		Name:  chi.URLParam(r, urlParamName),
 		Value: chi.URLParam(r, urlParamValue),
 	}
@@ -80,7 +80,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	if m.Type == "" || m.Name == "" || m.Value == "" {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) == 4 && parts[0] == updatePathPrefix {
-			m.Type, m.Name, m.Value = parts[1], parts[2], parts[3]
+			m.Type, m.Name, m.Value = models.MetricType(parts[1]), parts[2], parts[3]
 		}
 	}
 
@@ -191,7 +191,7 @@ func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m := models.Metric{
-		Type: chi.URLParam(r, urlParamType),
+		Type: models.MetricType(chi.URLParam(r, urlParamType)),
 		Name: chi.URLParam(r, urlParamName),
 	}
 

@@ -61,7 +61,7 @@ func isRetryableNetErr(err error) bool {
 
 // SendMetric - отправляет одну метрику по пути /update/{type}/{name}/{value}.
 func SendMetric(client *resty.Client, m models.Metric, key string) error {
-	postPath := path.Join("update", m.Type, m.Name, m.Value)
+	postPath := path.Join("update", string(m.Type), m.Name, m.Value)
 
 	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
 		req := client.R().

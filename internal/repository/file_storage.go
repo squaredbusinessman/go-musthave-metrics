@@ -23,10 +23,10 @@ type FileStorage struct {
 }
 
 type storageMetricRecord struct {
-	ID    string  `json:"id"`
-	MType string  `json:"type"`
-	Delta int64   `json:"delta,omitempty"`
-	Value float64 `json:"value,omitempty"`
+	ID    string            `json:"id"`
+	MType models.MetricType `json:"type"`
+	Delta int64             `json:"delta,omitempty"`
+	Value float64           `json:"value,omitempty"`
 }
 
 // NewFileStorage - создает файловое хранилище поверх основного Storage.
@@ -187,7 +187,7 @@ func writeMetricRecord(
 	first bool,
 	buf []byte,
 	id string,
-	metricType string,
+	metricType models.MetricType,
 	value float64,
 	delta int64,
 ) (bool, []byte, error) {
@@ -200,7 +200,7 @@ func writeMetricRecord(
 	buf = append(buf, `{"id":`...)
 	buf = strconv.AppendQuote(buf, id)
 	buf = append(buf, `,"type":`...)
-	buf = strconv.AppendQuote(buf, metricType)
+	buf = strconv.AppendQuote(buf, string(metricType))
 
 	if metricType == models.MetricTypeGauge {
 		buf = append(buf, `,"value":`...)

@@ -1,10 +1,13 @@
 package models
 
+// MetricType - тип метрики.
+type MetricType string
+
 const (
 	// MetricTypeGauge - тип метрики с плавающей точкой.
-	MetricTypeGauge = "gauge"
+	MetricTypeGauge MetricType = "gauge"
 	// MetricTypeCounter - тип метрики-счетчика.
-	MetricTypeCounter = "counter"
+	MetricTypeCounter MetricType = "counter"
 )
 
 // Gauge - значение gauge-метрики.
@@ -30,16 +33,16 @@ func (c *Counter) NewValueIncrement(val int64) {
 // Metrics - JSON-представление метрики для HTTP API.
 // Delta и Value сделаны указателями, чтобы отличать ноль от отсутствующего поля.
 type Metrics struct {
-	ID    string   `json:"id"`
-	MType string   `json:"type"`
-	Delta *int64   `json:"delta,omitempty"`
-	Value *float64 `json:"value,omitempty"`
-	Hash  string   `json:"hash,omitempty"`
+	ID    string     `json:"id"`
+	MType MetricType `json:"type"`
+	Delta *int64     `json:"delta,omitempty"`
+	Value *float64   `json:"value,omitempty"`
+	Hash  string     `json:"hash,omitempty"`
 }
 
 // Metric - плоская модель метрики для строковых HTTP-эндпоинтов.
 type Metric struct {
-	Type  string
+	Type  MetricType
 	Name  string
 	Value string
 }
