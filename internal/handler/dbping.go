@@ -6,10 +6,12 @@ import (
 	"time"
 )
 
+// DBPinger - минимальный интерфейс проверки доступности БД.
 type DBPinger interface {
 	Ping(ctx context.Context) error
 }
 
+// Ping - проверяет доступность базы данных.
 func (h *Handler) Ping(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)

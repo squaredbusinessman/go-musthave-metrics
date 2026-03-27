@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Config - конфигурация агента отправки метрик.
 type Config struct {
 	Addr           string `env:"ADDRESS"`
 	PollInterval   int    `env:"POLL_INTERVAL"`

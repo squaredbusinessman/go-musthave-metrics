@@ -1,14 +1,18 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
@@ -27,15 +31,20 @@ const (
 	contentTypeHTML      = "text/html; charset=utf-8"
 )
 
+// Handler - набор HTTP-хендлеров сервиса метрик.
 type Handler struct {
 	ms service.MetricsService
 	db DBPinger
+	// Аудит зависим от HTTP-запроса, потому что только здесь есть IP клиента.
+	auditor audit.Notifier
 }
 
-func New(ms service.MetricsService, db DBPinger) *Handler {
+// New - создает Handler с зависимостями сервиса, БД и аудита.
+func New(ms service.MetricsService, db DBPinger, auditor audit.Notifier) *Handler {
 	return &Handler{
-		ms: ms,
-		db: db,
+		ms:      ms,
+		db:      db,
+		auditor: auditor,
 	}
 }
 
@@ -50,7 +59,7 @@ func isJSONContentType(value string) bool {
 	return mediaType == contentAppJSON
 }
 
-// AcceptMetricsToStorage получаем метрики от агента и фиксируем в хранилище
+// AcceptMetricsToStorage - принимает метрику из URL и сохраняет ее в хранилище.
 func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -63,7 +72,7 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	}
 
 	m := models.Metric{
-		Type:  chi.URLParam(r, urlParamType),
+		Type:  models.MetricType(chi.URLParam(r, urlParamType)),
 		Name:  chi.URLParam(r, urlParamName),
 		Value: chi.URLParam(r, urlParamValue),
 	}
@@ -71,12 +80,12 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 	if m.Type == "" || m.Name == "" || m.Value == "" {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) == 4 && parts[0] == updatePathPrefix {
-			m.Type, m.Name, m.Value = parts[1], parts[2], parts[3]
+			m.Type, m.Name, m.Value = models.MetricType(parts[1]), parts[2], parts[3]
 		}
 	}
 
 	if m.Type == "" || m.Name == "" || m.Value == "" {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
@@ -85,9 +94,11 @@ func (h *Handler) AcceptMetricsToStorage(w http.ResponseWriter, r *http.Request)
 		apperr.WriteServiceError(w, err)
 		return
 	}
+	h.publishAudit(r, []string{m.Name})
 	w.WriteHeader(http.StatusOK)
 }
 
+// UpdateMetricJSON - обновляет одну метрику из JSON-запроса.
 func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -127,6 +138,7 @@ func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
+	h.publishAudit(request, []string{req.ID})
 	writer.Header().Set("Content-Type", contentAppJSON)
 	writer.WriteHeader(http.StatusOK)
 	if err = json.NewEncoder(writer).Encode(storedMetric); err != nil {
@@ -134,6 +146,7 @@ func (h *Handler) UpdateMetricJSON(writer http.ResponseWriter, request *http.Req
 	}
 }
 
+// UpdateMetricsBatch - обновляет несколько метрик одним JSON-запросом.
 func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -166,9 +179,11 @@ func (h *Handler) UpdateMetricsBatch(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	h.publishAudit(request, metricNames(req))
 	writer.WriteHeader(http.StatusOK)
 }
 
+// GetMetric - возвращает значение метрики в текстовом виде.
 func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -176,7 +191,7 @@ func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m := models.Metric{
-		Type: chi.URLParam(r, urlParamType),
+		Type: models.MetricType(chi.URLParam(r, urlParamType)),
 		Name: chi.URLParam(r, urlParamName),
 	}
 
@@ -196,6 +211,7 @@ func (h *Handler) GetMetric(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, value)
 }
 
+// GetMetricJSON - возвращает значение метрики в JSON-виде.
 func (h *Handler) GetMetricJSON(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		http.Error(writer, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -235,6 +251,7 @@ func (h *Handler) GetMetricJSON(writer http.ResponseWriter, request *http.Reques
 	}
 }
 
+// GetAllMetrics - отдает HTML-страницу со всеми доступными метриками.
 func (h *Handler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
@@ -263,4 +280,61 @@ func (h *Handler) GetAllMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fmt.Fprintf(w, "</table></body></html>")
+}
+
+func (h *Handler) publishAudit(request *http.Request, metrics []string) {
+	if h.auditor == nil || len(metrics) == 0 {
+		return
+	}
+
+	event := audit.Event{
+		TS:        time.Now().Unix(),
+		Metrics:   append([]string(nil), metrics...),
+		IPAddress: requestIP(request),
+	}
+
+	// Основной запрос уже успешно обработан.
+	// Аудит отправляем отдельно и не роняем из-за него ответ клиенту.
+	ctx := context.WithoutCancel(request.Context())
+	if err := h.auditor.Notify(ctx, event); err != nil {
+		logger.Log.Error("audit notify failure",
+			zap.Error(err),
+			zap.Strings("metrics", event.Metrics),
+			zap.String("ip_address", event.IPAddress),
+		)
+	}
+}
+
+func metricNames(metrics []models.Metrics) []string {
+	names := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		names = append(names, metric.ID)
+	}
+	return names
+}
+
+func requestIP(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+
+	// Если сервер стоит за прокси, сначала берём адрес из заголовков.
+	if ip := strings.TrimSpace(request.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+
+	if forwarded := strings.TrimSpace(request.Header.Get("X-Forwarded-For")); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	// Иначе остаётся адрес TCP-соединения.
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err == nil {
+		return host
+	}
+
+	return request.RemoteAddr
 }

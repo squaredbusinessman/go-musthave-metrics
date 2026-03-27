@@ -1,22 +1,35 @@
 package repository
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
+// ErrFileStoragePathEmpty - путь к файлу хранилища не задан.
 var ErrFileStoragePathEmpty = errors.New("file storage path is empty")
 
+// FileStorage - файловая персистентность для метрик.
 type FileStorage struct {
 	path  string
 	store Storage
 }
 
+type storageMetricRecord struct {
+	ID    string            `json:"id"`
+	MType models.MetricType `json:"type"`
+	Delta int64             `json:"delta,omitempty"`
+	Value float64           `json:"value,omitempty"`
+}
+
+// NewFileStorage - создает файловое хранилище поверх основного Storage.
 func NewFileStorage(path string, store Storage) *FileStorage {
 	return &FileStorage{
 		path:  path,
@@ -24,35 +37,13 @@ func NewFileStorage(path string, store Storage) *FileStorage {
 	}
 }
 
+// Save - сохраняет текущие метрики в файл.
 func (fs *FileStorage) Save() error {
 	if fs.path == "" {
 		return ErrFileStoragePathEmpty
 	}
 
 	gauges, counters, err := fs.store.Snapshot(context.Background())
-	if err != nil {
-		return err
-	}
-
-	metrics := make([]models.Metrics, 0, len(gauges)+len(counters))
-	for id, gauge := range gauges {
-		value := gauge.Value
-		metrics = append(metrics, models.Metrics{
-			ID:    id,
-			MType: "gauge",
-			Value: &value,
-		})
-	}
-	for id, counter := range counters {
-		delta := counter.Value
-		metrics = append(metrics, models.Metrics{
-			ID:    id,
-			MType: "counter",
-			Delta: &delta,
-		})
-	}
-
-	data, err := json.MarshalIndent(metrics, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -72,7 +63,7 @@ func (fs *FileStorage) Save() error {
 	}
 	defer os.Remove(tmp.Name())
 
-	if _, err := tmp.Write(data); err != nil {
+	if err := writeMetricsJSON(tmp, gauges, counters); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -93,6 +84,7 @@ func (fs *FileStorage) Save() error {
 	return nil
 }
 
+// Restore - загружает метрики из файла в основное хранилище.
 func (fs *FileStorage) Restore() error {
 	ctx := context.Background()
 
@@ -100,36 +92,128 @@ func (fs *FileStorage) Restore() error {
 		return ErrFileStoragePathEmpty
 	}
 
-	data, err := os.ReadFile(fs.path)
+	file, err := os.Open(fs.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
 	}
-	if len(data) == 0 {
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() == 0 {
 		return nil
 	}
 
-	var metrics []models.Metrics
-	if err := json.Unmarshal(data, &metrics); err != nil {
+	decoder := json.NewDecoder(bufio.NewReader(file))
+	token, err := decoder.Token()
+	if err != nil {
 		return err
 	}
+	delimiter, ok := token.(json.Delim)
+	if !ok || delimiter != '[' {
+		return errors.New("metrics payload must be a JSON array")
+	}
 
-	for _, metric := range metrics {
+	for decoder.More() {
+		var metric storageMetricRecord
+		if err := decoder.Decode(&metric); err != nil {
+			return err
+		}
+
 		switch metric.MType {
 		case models.MetricTypeGauge:
-			if metric.Value == nil {
+			if metric.ID == "" {
 				continue
 			}
-			_ = fs.store.SetGauge(ctx, metric.ID, models.Gauge{Value: *metric.Value})
+			_ = fs.store.SetGauge(ctx, metric.ID, models.Gauge{Value: metric.Value})
 		case models.MetricTypeCounter:
-			if metric.Delta == nil {
+			if metric.ID == "" {
 				continue
 			}
-			_ = fs.store.AddCounter(ctx, metric.ID, *metric.Delta)
+			_ = fs.store.AddCounter(ctx, metric.ID, metric.Delta)
 		}
 	}
 
+	token, err = decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok = token.(json.Delim)
+	if !ok || delimiter != ']' {
+		return errors.New("metrics payload must end with a JSON array")
+	}
+
 	return nil
+}
+
+func writeMetricsJSON(w io.Writer, gauges map[string]models.Gauge, counters map[string]models.Counter) error {
+	bw := bufio.NewWriterSize(w, 64*1024)
+	if err := bw.WriteByte('['); err != nil {
+		return err
+	}
+
+	first := true
+	record := make([]byte, 0, 128)
+
+	for id, gauge := range gauges {
+		var err error
+		first, record, err = writeMetricRecord(bw, first, record[:0], id, models.MetricTypeGauge, gauge.Value, 0)
+		if err != nil {
+			return err
+		}
+	}
+
+	for id, counter := range counters {
+		var err error
+		first, record, err = writeMetricRecord(bw, first, record[:0], id, models.MetricTypeCounter, 0, counter.Value)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := bw.WriteByte(']'); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+func writeMetricRecord(
+	bw *bufio.Writer,
+	first bool,
+	buf []byte,
+	id string,
+	metricType models.MetricType,
+	value float64,
+	delta int64,
+) (bool, []byte, error) {
+	if !first {
+		if err := bw.WriteByte(','); err != nil {
+			return first, buf, err
+		}
+	}
+
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, id)
+	buf = append(buf, `,"type":`...)
+	buf = strconv.AppendQuote(buf, string(metricType))
+
+	if metricType == models.MetricTypeGauge {
+		buf = append(buf, `,"value":`...)
+		buf = strconv.AppendFloat(buf, value, 'f', -1, 64)
+	} else {
+		buf = append(buf, `,"delta":`...)
+		buf = strconv.AppendInt(buf, delta, 10)
+	}
+
+	buf = append(buf, '}')
+	if _, err := bw.Write(buf); err != nil {
+		return first, buf, err
+	}
+
+	return false, buf, nil
 }

@@ -16,6 +16,7 @@ var serviceErrorResponses = map[error]errorResponse{
 	ErrMetricNotFound:    {status: http.StatusNotFound},
 }
 
+// WriteServiceError - переводит сервисную ошибку в HTTP-ответ.
 func WriteServiceError(w http.ResponseWriter, err error) {
 	for target, resp := range serviceErrorResponses {
 		if errors.Is(err, target) {

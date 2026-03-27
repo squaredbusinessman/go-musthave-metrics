@@ -5,8 +5,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// Job - задача, которую выполняет worker агента.
 type Job func() error
 
+// StartWorkers - запускает пул воркеров для обработки задач.
 func StartWorkers(n int, jobs <-chan Job) {
 	if n < 1 {
 		n = 1

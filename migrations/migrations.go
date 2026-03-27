@@ -6,6 +6,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
+// Up - применяет все доступные миграции к базе данных.
 func Up(pool *pgxpool.Pool, dir string) error {
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()

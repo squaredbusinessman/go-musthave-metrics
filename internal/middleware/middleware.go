@@ -12,8 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// Middleware - функция, которая оборачивает HTTP-хендлер.
 type Middleware func(handler http.Handler) http.Handler
 
+// Conveyor - последовательно применяет набор middleware к хендлеру.
 func Conveyor(h http.Handler, middlewares ...Middleware) http.Handler {
 	for _, middleware := range middlewares {
 		h = middleware(h)
@@ -21,6 +23,7 @@ func Conveyor(h http.Handler, middlewares ...Middleware) http.Handler {
 	return h
 }
 
+// RequestLogger - пишет в лог данные по HTTP-запросу и ответу.
 func RequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		start := time.Now()
@@ -38,6 +41,7 @@ func RequestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// GzipMiddleware - распаковывает gzip-запросы и сжимает gzip-ответы.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		originalWriter := writer
@@ -69,6 +73,7 @@ func GzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// HashMiddleware - проверяет подпись входящего тела и подписывает ответ.
 func HashMiddleware(key string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
