@@ -11,8 +11,6 @@ import (
 )
 
 func TestSHA256Hex(t *testing.T) {
-	t.Helper()
-
 	sum := sha256.Sum256([]byte("payloadsecret"))
 	want := hex.EncodeToString(sum[:])
 

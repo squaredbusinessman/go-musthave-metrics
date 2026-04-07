@@ -317,7 +317,7 @@ func receiverType(typeSpec *ast.TypeSpec) string {
 		return typeSpec.Name.Name
 	}
 
-	names := make([]string, 0)
+	var names []string
 	for _, field := range typeSpec.TypeParams.List {
 		for _, name := range field.Names {
 			names = append(names, name.Name)
@@ -667,8 +667,8 @@ func derefExpr(expr string) string {
 	return "(*" + expr + ")"
 }
 
-// writeIfChanged записывает generated file только если содержимое реально
-// изменилось. Это избавляет от лишних перезаписей и ненужного шума в git.
+// writeIfChanged не перезаписывает generated file без необходимости: если
+// текущее содержимое совпадает, функция завершится без записи.
 func writeIfChanged(path string, src []byte) error {
 	current, err := os.ReadFile(path)
 	if err == nil && bytes.Equal(current, src) {
