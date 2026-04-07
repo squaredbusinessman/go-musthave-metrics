@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/apperr"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 )
 
@@ -166,6 +167,84 @@ func TestMemStorage_GetCounter(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("GetCounter() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMemStorageUpdateMetricsBatch(t *testing.T) {
+	ctx := context.Background()
+	ms := NewMemStorage()
+
+	gaugeValue := 12.5
+	counterDelta := int64(3)
+	metrics := []models.Metrics{
+		{ID: "Alloc", MType: models.MetricTypeGauge, Value: &gaugeValue},
+		{ID: "PollCount", MType: models.MetricTypeCounter, Delta: &counterDelta},
+	}
+
+	if err := ms.UpdateMetricsBatch(ctx, metrics); err != nil {
+		t.Fatalf("UpdateMetricsBatch() error = %v", err)
+	}
+
+	gauge, err := ms.GetGauge(ctx, "Alloc")
+	if err != nil {
+		t.Fatalf("GetGauge() error = %v", err)
+	}
+	if gauge != gaugeValue {
+		t.Fatalf("gauge = %v, want %v", gauge, gaugeValue)
+	}
+
+	counter, err := ms.GetCounter(ctx, "PollCount")
+	if err != nil {
+		t.Fatalf("GetCounter() error = %v", err)
+	}
+	if counter != counterDelta {
+		t.Fatalf("counter = %v, want %v", counter, counterDelta)
+	}
+}
+
+func TestMemStorageUpdateMetricsBatchValidation(t *testing.T) {
+	ctx := context.Background()
+	ms := NewMemStorage()
+
+	tests := []struct {
+		name    string
+		metrics []models.Metrics
+		wantErr error
+	}{
+		{
+			name:    "empty batch",
+			metrics: nil,
+		},
+		{
+			name: "missing gauge value",
+			metrics: []models.Metrics{
+				{ID: "Alloc", MType: models.MetricTypeGauge},
+			},
+			wantErr: apperr.ErrBadMetricValue,
+		},
+		{
+			name: "missing counter delta",
+			metrics: []models.Metrics{
+				{ID: "PollCount", MType: models.MetricTypeCounter},
+			},
+			wantErr: apperr.ErrBadMetricValue,
+		},
+		{
+			name: "unknown metric type",
+			metrics: []models.Metrics{
+				{ID: "Unknown", MType: "summary"},
+			},
+			wantErr: apperr.ErrUnknownMetricType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ms.UpdateMetricsBatch(ctx, tt.metrics)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("UpdateMetricsBatch() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}

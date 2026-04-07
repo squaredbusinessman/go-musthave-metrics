@@ -4,12 +4,14 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
@@ -17,6 +19,12 @@ import (
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 	"github.com/squaredbusinessman/go-musthave-metrics/migrations"
 	"go.uber.org/zap"
+)
+
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
 )
 
 func buildRouter(h *handler.Handler, key string) http.Handler {
@@ -43,6 +51,8 @@ func buildRouter(h *handler.Handler, key string) http.Handler {
 }
 
 func main() {
+	buildinfo.Print(os.Stdout, buildVersion, buildDate, buildCommit)
+
 	// обработка аргументов командной строки
 	cfg := parseConfig()
 

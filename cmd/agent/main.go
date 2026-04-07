@@ -3,15 +3,25 @@ package main
 import (
 	"log"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	buildinfo.Print(os.Stdout, buildVersion, buildDate, buildCommit)
+
 	// Инициализация логгера в агенте
 	if err := myLog.Initialize("info"); err != nil {
 		log.Fatalf("init logger failure: %v", err)
