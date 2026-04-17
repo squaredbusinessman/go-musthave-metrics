@@ -15,6 +15,7 @@ type Config struct {
 	Storage  StorageConfig
 	Database DBConfig
 	Audit    AuditConfig
+	Crypto   CryptoConfig
 }
 
 // DBConfig - настройки подключения к PostgreSQL.
@@ -41,6 +42,11 @@ type StorageConfig struct {
 type AuditConfig struct {
 	FilePath string `env:"AUDIT_FILE"`
 	URL      string `env:"AUDIT_URL"`
+}
+
+// CryptoConfig - настройки шифрования
+type CryptoConfig struct {
+	KeyPath string `env:"CRYPTO_KEY"`
 }
 
 func parseConfig() Config {
@@ -77,12 +83,12 @@ func parseConfigArgs(args []string) (Config, error) {
 	fs.StringVar(&cfg.Database.DSN, "d", "", "database DSN")
 	fs.StringVar(&cfg.Audit.FilePath, "audit-file", "", "audit log file path")
 	fs.StringVar(&cfg.Audit.URL, "audit-url", "", "audit receiver URL")
+	fs.StringVar(&cfg.Crypto.KeyPath, "crypto-key", "", "crypto key")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
 
-	// Не понимаю, насколько это кринж.
 	// Суть в том чтобы чекнуть, был ли флаг -f передан явно.
 	fileFlagSet := false
 

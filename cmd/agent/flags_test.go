@@ -37,7 +37,23 @@ func TestParseConfig(t *testing.T) {
 
 	flag.CommandLine = flag.NewFlagSet("agent", flag.ContinueOnError)
 	flag.CommandLine.SetOutput(io.Discard)
-	os.Args = []string{"agent", "-a", "localhost:9090", "-p", "3", "-r", "12", "-f", "JSON", "-k", "secret", "-l", "4"}
+	os.Args = []string{
+		"agent",
+		"-a",
+		"localhost:9090",
+		"-p",
+		"3",
+		"-r",
+		"12",
+		"-f",
+		"JSON",
+		"-k",
+		"secret",
+		"-l",
+		"4",
+		"-crypto-key",
+		"/tmp/public.pem",
+	}
 
 	cfg := parseConfig()
 
@@ -58,5 +74,8 @@ func TestParseConfig(t *testing.T) {
 	}
 	if cfg.RateLimit != 4 {
 		t.Fatalf("RateLimit = %d, want 4", cfg.RateLimit)
+	}
+	if cfg.CryptoKey != "/tmp/public.pem" {
+		t.Fatalf("CryptoKey = %q, want %q", cfg.CryptoKey, "/tmp/public.pem")
 	}
 }

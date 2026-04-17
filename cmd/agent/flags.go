@@ -18,6 +18,7 @@ type Config struct {
 	ReportFormat   string `env:"REPORT_FORMAT"`
 	Key            string `env:"KEY"`
 	RateLimit      int    `env:"RATE_LIMIT"`
+	CryptoKey      string `env:"CRYPTO_KEY"`
 }
 
 func parseConfig() Config {
@@ -29,6 +30,7 @@ func parseConfig() Config {
 	flag.StringVar(&cfg.ReportFormat, "f", agent.ReportFormatPlain, "Report format: plain or json")
 	flag.StringVar(&cfg.Key, "k", "", "Hash key")
 	flag.IntVar(&cfg.RateLimit, "l", 1, "Rate limiting")
+	flag.StringVar(&cfg.CryptoKey, "crypto-key", "", "Crypto key")
 
 	flag.Parse()
 

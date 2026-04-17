@@ -32,3 +32,27 @@ func TestParseConfigArgsAuditFromEnv(t *testing.T) {
 		t.Fatalf("Audit.URL = %q, want %q", got, want)
 	}
 }
+
+func TestParseConfigArgsCryptoKeyFromFlag(t *testing.T) {
+	cfg, err := parseConfigArgs([]string{"-crypto-key", "/tmp/private.pem"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Crypto.KeyPath, "/tmp/private.pem"; got != want {
+		t.Fatalf("Crypto.CryptoKey = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsCryptoKeyFromEnv(t *testing.T) {
+	t.Setenv("CRYPTO_KEY", "/tmp/env-private.pem")
+
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Crypto.KeyPath, "/tmp/env-private.pem"; got != want {
+		t.Fatalf("Crypto.CryptoKey = %q, want %q", got, want)
+	}
+}
