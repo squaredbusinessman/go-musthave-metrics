@@ -40,7 +40,7 @@ func TestParseConfigArgsCryptoKeyFromFlag(t *testing.T) {
 	}
 
 	if got, want := cfg.Crypto.KeyPath, "/tmp/private.pem"; got != want {
-		t.Fatalf("Crypto.CryptoKey = %q, want %q", got, want)
+		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
 	}
 }
 
@@ -53,6 +53,6 @@ func TestParseConfigArgsCryptoKeyFromEnv(t *testing.T) {
 	}
 
 	if got, want := cfg.Crypto.KeyPath, "/tmp/env-private.pem"; got != want {
-		t.Fatalf("Crypto.CryptoKey = %q, want %q", got, want)
+		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
 	}
 }
