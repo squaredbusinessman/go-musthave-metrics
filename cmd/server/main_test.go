@@ -64,3 +64,13 @@ func TestEncryptedAgentRequestThroughServerRouter(t *testing.T) {
 		t.Fatalf("PollCount = %d, want 3", got)
 	}
 }
+
+/*Для ручной проверки создаем ключи:
+
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
+
+Запускаем сервер и агент в 2-х терминалах:
+
+go run ./cmd/server -crypto-key private.pem
+go run ./cmd/agent -crypto-key public.pem*/
