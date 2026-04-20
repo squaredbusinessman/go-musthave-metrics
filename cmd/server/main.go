@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	"log"
 	"net/http"
 	"os"
@@ -27,7 +29,7 @@ var (
 	buildCommit  string
 )
 
-func buildRouter(h *handler.Handler, key string) http.Handler {
+func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.StripSlashes)
 
@@ -47,7 +49,14 @@ func buildRouter(h *handler.Handler, key string) http.Handler {
 	// проверка соединения с БД
 	r.Get("/ping", h.Ping)
 
-	return middleware.Conveyor(r, middleware.RequestLogger, middleware.HashMiddleware(key), middleware.GzipMiddleware)
+	// не забыть что конвейер работает с миддлварами в обратном порядке
+	return middleware.Conveyor(
+		r,
+		middleware.RequestLogger,
+		middleware.HashMiddleware(key),
+		middleware.GzipMiddleware,
+		middleware.CryptoMiddleware(privateKey),
+	)
 }
 
 func main() {
@@ -66,7 +75,16 @@ func main() {
 		store       repository.Storage
 		fileStorage *repository.FileStorage
 		dbPool      *pgxpool.Pool
+		privateKey  *rsa.PrivateKey
 	)
+
+	if cfg.Crypto.KeyPath != "" {
+		var err error
+		privateKey, err = cryptoutil.LoadPrivateKey(cfg.Crypto.KeyPath)
+		if err != nil {
+			log.Fatalf("load private key failure: %v", err)
+		}
+	}
 
 	switch {
 	// Подключаемся к postgreSQL через драйвер pgx,
@@ -152,7 +170,7 @@ func main() {
 		}()
 	}
 
-	router := buildRouter(h, cfg.Server.Key)
+	router := buildRouter(h, cfg.Server.Key, privateKey)
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
