@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"bytes"
+	"crypto/rsa"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"go.uber.org/zap"
 )
@@ -71,6 +73,49 @@ func GzipMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(originalWriter, request)
 	})
+}
+
+// CryptoMiddleware - расшифровывает зашифрованное тело запроса.
+func CryptoMiddleware(privateKey *rsa.PrivateKey) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			encryption := request.Header.Get("Content-Encryption")
+			if encryption == "" {
+				next.ServeHTTP(writer, request)
+				return
+			}
+
+			if encryption != "rsa-aes-gcm" {
+				http.Error(writer, "unsupported encryption", http.StatusUnsupportedMediaType)
+				return
+			}
+
+			if privateKey == nil {
+				http.Error(writer, "private key is required", http.StatusBadRequest)
+				return
+			}
+
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				http.Error(writer, "failed to read request body", http.StatusBadRequest)
+				return
+			}
+
+			_ = request.Body.Close()
+
+			decrypted, err := cryptoutil.Decrypt(privateKey, body)
+			if err != nil {
+				http.Error(writer, "failed to decrypt request body", http.StatusBadRequest)
+				return
+			}
+
+			request.Body = io.NopCloser(bytes.NewReader(decrypted))
+			request.ContentLength = int64(len(decrypted))
+			request.Header.Del("Content-Encryption")
+
+			next.ServeHTTP(writer, request)
+		})
+	}
 }
 
 // HashMiddleware - проверяет подпись входящего тела и подписывает ответ.
