@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rsa"
 	"log"
 	"math/rand"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
@@ -29,6 +31,17 @@ func main() {
 	defer myLog.Log.Sync()
 
 	cfg := parseConfig()
+
+	var publicKey *rsa.PublicKey
+	if cfg.CryptoKey != "" {
+		var err error
+		publicKey, err = cryptoutil.LoadPublicKey(cfg.CryptoKey)
+		if err != nil {
+			log.Fatalf("load crypto public key failure: %v", err)
+		}
+
+		cfg.ReportFormat = agent.ReportFormatJSON
+	}
 
 	jobs := make(chan agent.Job, cfg.RateLimit)
 	agent.StartWorkers(cfg.RateLimit, jobs)
@@ -68,7 +81,7 @@ func main() {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			agent.ReportMetrics(client, store, cfg.ReportFormat, cfg.Key, jobs)
+			agent.ReportMetrics(client, store, cfg.ReportFormat, cfg.Key, publicKey, jobs)
 		}
 	}()
 

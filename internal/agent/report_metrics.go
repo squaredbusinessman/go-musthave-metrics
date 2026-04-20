@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
@@ -89,7 +91,7 @@ func SendMetric(client *resty.Client, m models.Metric, key string) error {
 	return nil
 }
 
-func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string) error {
+func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string, publicKey *rsa.PublicKey) error {
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -104,11 +106,25 @@ func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key st
 		return err
 	}
 
+	encrypted := false
+	if publicKey != nil {
+		body, err = cryptoutil.Encrypt(publicKey, body)
+		if err != nil {
+			return err
+		}
+		encrypted = true
+	}
+
 	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
 		req := client.R().
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Content-Encoding", "gzip").
 			SetBody(body)
+
+		if encrypted {
+			req.SetHeader("Content-Encryption", "rsa-aes-gcm")
+		}
+
 		if key != "" {
 			req.SetHeader("HashSHA256", sha256hex(payload, key))
 		}
@@ -164,8 +180,11 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 }
 
 // ReportMetrics - ставит в очередь отправку всех накопленных метрик.
-func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job) {
+func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job) {
 	format := normalizeReportFormat(reportFormat)
+	if publicKey != nil {
+		format = ReportFormatJSON
+	}
 
 	gauges, counters, err := store.Snapshot(context.Background())
 	if err != nil {
@@ -180,7 +199,7 @@ func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat
 		}
 
 		jobs <- func() error {
-			return sendMetricsBatchJSON(client, metrics, key)
+			return sendMetricsBatchJSON(client, metrics, key, publicKey)
 		}
 		return
 	}
