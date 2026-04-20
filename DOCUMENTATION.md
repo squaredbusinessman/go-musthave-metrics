@@ -5,6 +5,27 @@
 - **Агент**: собирает метрики (runtime и gopsutil) и отправляет их на сервер.
 - **Сервер**: принимает, хранит и отдаёт метрики (в памяти, файле или PostgreSQL).
 
+Передача метрик от агента к серверу поддерживает gzip-сжатие, подпись `HashSHA256`
+и опциональное асимметричное шифрование. Для шифрования используется гибридная
+схема: тело запроса шифруется случайным AES-256-GCM ключом, а сам AES-ключ
+шифруется публичным RSA-ключом через RSA-OAEP/SHA-256. Такой подход выбран,
+потому что RSA не подходит для шифрования больших JSON/gzip payload целиком:
+размер RSA-блока ограничен длиной ключа и схемой padding. AES-GCM эффективно
+шифрует данные произвольного размера и одновременно проверяет целостность
+ciphertext, а RSA-OAEP безопасно передаёт одноразовый симметричный ключ.
+
+Порядок обработки запроса:
+- агент формирует JSON payload метрик;
+- при наличии `KEY` считает `HashSHA256` по исходному JSON payload;
+- сжимает payload через gzip;
+- при наличии публичного ключа шифрует gzip-body и ставит заголовок
+  `Content-Encryption: rsa-aes-gcm`;
+- сервер сначала расшифровывает body, затем распаковывает gzip, затем проверяет
+  `HashSHA256` и передаёт JSON в handler.
+
+Ключи передаются через флаг `-crypto-key` или переменную окружения `CRYPTO_KEY`:
+агент получает путь к публичному ключу, сервер получает путь к приватному ключу.
+
 ---
 
 ## cmd/agent
@@ -20,11 +41,12 @@
   - `ReportFormat` (string): формат отправки (`plain` или `json`).
   - `Key` (string): ключ подписи (HashSHA256).
   - `RateLimit` (int): лимит параллельных исходящих запросов.
+  - `CryptoKey` (string): путь к публичному ключу для шифрования запросов.
   - Код: [cmd/agent/flags.go](cmd/agent/flags.go)
 
 ### Функции
 - `func main()`
-  - Запускает агент: инициализация логгера, парсинг конфигурации, создание worker pool, запуск горутин сбора и отправки.
+  - Запускает агент: инициализация логгера, парсинг конфигурации, загрузка публичного ключа шифрования, создание worker pool, запуск горутин сбора и отправки.
   - Вход: конфигурация через флаги и ENV.
   - Выход: бесконечная работа агента, ошибки критичны (log.Fatalf).
   - Код: [cmd/agent/main.go](cmd/agent/main.go)
@@ -50,7 +72,7 @@
 
 ### Структуры
 - `type Config` — корневая конфигурация сервера.
-  - `Server` (ServerConfig), `Storage` (StorageConfig), `Database` (DBConfig)
+  - `Server` (ServerConfig), `Storage` (StorageConfig), `Database` (DBConfig), `Audit` (AuditConfig), `Crypto` (CryptoConfig)
   - Код: [cmd/server/flags.go](cmd/server/flags.go)
 
 - `type ServerConfig`
@@ -70,11 +92,26 @@
   - `DSN` (string): строка подключения к БД.
   - Код: [cmd/server/flags.go](cmd/server/flags.go)
 
+- `type AuditConfig`
+  - `FilePath` (string): путь к файлу аудита.
+  - `URL` (string): URL внешнего приёмника аудита.
+  - Код: [cmd/server/flags.go](cmd/server/flags.go)
+
+- `type CryptoConfig`
+  - `KeyPath` (string): путь к приватному ключу для расшифровки запросов.
+  - Код: [cmd/server/flags.go](cmd/server/flags.go)
+
 ### Функции
 - `func main()`
-  - Инициализирует логгер, выбирает хранилище (mem/file/pg), поднимает HTTP-сервер, подключает middleware.
+  - Инициализирует логгер, загружает приватный ключ шифрования, выбирает хранилище (mem/file/pg), поднимает HTTP-сервер, подключает middleware.
   - Вход: конфигурация через флаги и ENV.
   - Выход: слушает HTTP, завершает работу при фатальных ошибках.
+  - Код: [cmd/server/main.go](cmd/server/main.go)
+
+- `func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler`
+  - Собирает HTTP router и подключает middleware в порядке `Crypto -> Gzip -> Hash -> Handler`.
+  - Вход: handler, ключ подписи, приватный ключ расшифровки.
+  - Выход: готовый `http.Handler`.
   - Код: [cmd/server/main.go](cmd/server/main.go)
 
 - `func parseConfig() Config`
@@ -109,15 +146,16 @@
   - Выход: `error` при сетевых/HTTP ошибках.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
-- `func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string) error`
-  - Отправляет батч метрик в JSON (gzip) на `/updates`.
-  - Вход: REST клиент, список `Metrics`, ключ подписи.
+- `func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string, publicKey *rsa.PublicKey) error`
+  - Отправляет батч метрик в JSON на `/updates`: сериализует payload, сжимает gzip и при наличии публичного ключа шифрует тело запроса.
+  - Вход: REST клиент, список `Metrics`, ключ подписи, публичный ключ шифрования.
   - Выход: `error` при сетевых/HTTP ошибках.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
-- `func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, jobs chan<- Job)`
+- `func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job)`
   - Снимает snapshot из `MemStorage` и ставит задачи отправки в канал `jobs`.
-  - Вход: REST клиент, хранилище, формат, ключ, канал задач.
+  - Если публичный ключ задан, принудительно использует JSON batch-режим, потому что plain-режим передаёт значения метрик в URL и не может быть зашифрован как body.
+  - Вход: REST клиент, хранилище, формат, ключ подписи, публичный ключ шифрования, канал задач.
   - Выход: задачи в очередь; ошибки логируются воркерами.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
@@ -144,6 +182,13 @@
   - Вход: строка формата.
   - Выход: `plain` или `json`.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
+
+### Шифрование исходящих запросов
+- При заданном публичном ключе агент добавляет заголовок `Content-Encryption: rsa-aes-gcm`.
+- Тело HTTP-запроса содержит JSON-envelope с полями `key`, `nonce`, `data`.
+- Поле `key` содержит RSA-OAEP encrypted AES key в base64.
+- Поля `nonce` и `data` содержат параметры AES-GCM в base64.
+- Заголовок `Content-Encoding: gzip` сохраняется, потому что после расшифровки сервер получает gzip-body и передаёт его в `GzipMiddleware`.
 
 ### Хеширование
 - `func sha256hex(body []byte, key string) string`
@@ -189,6 +234,54 @@
   - Вход: число воркеров, канал задач.
   - Выход: горутины, выполняющие `job()`; ошибки логируются.
   - Код: [internal/agent/worker_pool.go](internal/agent/worker_pool.go)
+
+---
+
+## internal/cryptoutil
+Назначение: загрузка RSA-ключей и гибридное шифрование запросов агента.
+
+Ссылка на пакет: `internal/cryptoutil/`
+
+### Структуры
+- `type Envelope`
+  - JSON-обёртка зашифрованного payload.
+  - `EncryptedKey` (`json:"key"`): AES-ключ, зашифрованный публичным RSA-ключом и закодированный в base64.
+  - `Nonce` (`json:"nonce"`): nonce для AES-GCM в base64.
+  - `Data` (`json:"data"`): ciphertext AES-GCM в base64.
+  - Код: [internal/cryptoutil/cryptoutil.go](internal/cryptoutil/cryptoutil.go)
+
+### Функции
+- `func LoadPublicKey(path string) (*rsa.PublicKey, error)`
+  - Читает публичный RSA-ключ из PEM-файла.
+  - Поддерживает блоки `PUBLIC KEY` (PKIX) и `RSA PUBLIC KEY` (PKCS#1).
+  - Вход: путь к файлу.
+  - Выход: публичный RSA-ключ или ошибка.
+  - Код: [internal/cryptoutil/cryptoutil.go](internal/cryptoutil/cryptoutil.go)
+
+- `func LoadPrivateKey(path string) (*rsa.PrivateKey, error)`
+  - Читает приватный RSA-ключ из PEM-файла.
+  - Поддерживает блоки `PRIVATE KEY` (PKCS#8) и `RSA PRIVATE KEY` (PKCS#1).
+  - Вход: путь к файлу.
+  - Выход: приватный RSA-ключ или ошибка.
+  - Код: [internal/cryptoutil/cryptoutil.go](internal/cryptoutil/cryptoutil.go)
+
+- `func Encrypt(publicKey *rsa.PublicKey, plainText []byte) ([]byte, error)`
+  - Генерирует одноразовый AES-256 ключ, шифрует `plainText` через AES-GCM, шифрует AES-ключ через RSA-OAEP/SHA-256 и возвращает JSON-envelope.
+  - Вход: публичный RSA-ключ и открытый payload.
+  - Выход: JSON-envelope или ошибка.
+  - Код: [internal/cryptoutil/cryptoutil.go](internal/cryptoutil/cryptoutil.go)
+
+- `func Decrypt(privateKey *rsa.PrivateKey, payload []byte) ([]byte, error)`
+  - Читает JSON-envelope, расшифровывает AES-ключ приватным RSA-ключом через RSA-OAEP/SHA-256 и расшифровывает `data` через AES-GCM.
+  - Вход: приватный RSA-ключ и JSON-envelope.
+  - Выход: открытый payload или ошибка.
+  - Код: [internal/cryptoutil/cryptoutil.go](internal/cryptoutil/cryptoutil.go)
+
+### Почему гибридная схема
+- RSA используется только для шифрования короткого одноразового AES-ключа.
+- AES-GCM используется для основного тела запроса, потому что размер JSON/gzip payload не ограничен RSA-блоком.
+- GCM дополнительно проверяет целостность ciphertext при расшифровке.
+- RSA-OAEP с SHA-256 выбран вместо устаревших схем padding, чтобы использовать современную стандартную схему асимметричного шифрования из `crypto/rsa`.
 
 ---
 
@@ -332,6 +425,12 @@
 - `func GzipMiddleware(next http.Handler) http.Handler`
   - Если клиент поддерживает gzip — сжимает ответ.
   - Если запрос gzipped — распаковывает тело.
+  - Код: [internal/middleware/middleware.go](internal/middleware/middleware.go)
+
+- `func CryptoMiddleware(privateKey *rsa.PrivateKey) Middleware`
+  - Если в запросе есть `Content-Encryption: rsa-aes-gcm`, читает encrypted envelope из body, расшифровывает его приватным ключом и заменяет `request.Body` на расшифрованные байты.
+  - Должен выполняться до `GzipMiddleware`, потому что агент шифрует уже gzip-сжатое тело.
+  - Если заголовок шифрования отсутствует, пропускает запрос без изменений.
   - Код: [internal/middleware/middleware.go](internal/middleware/middleware.go)
 
 - `func HashMiddleware(key string) Middleware`
