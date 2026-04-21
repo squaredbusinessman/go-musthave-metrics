@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,6 +32,8 @@ var (
 	buildDate    string
 	buildCommit  string
 )
+
+const shutdownTimeout = 15 * time.Second
 
 func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
 	r := chi.NewRouter()
@@ -96,7 +102,6 @@ func main() {
 			log.Fatalf("db pool init failure: %v", err)
 		}
 		dbPool = pool
-		defer dbPool.Close()
 
 		if err = migrations.Up(dbPool, "migrations"); err != nil {
 			myLog.Log.Error("migrations failure", zap.Error(err))
@@ -151,10 +156,16 @@ func main() {
 	// Хендлер знает HTTP-контекст запроса, поэтому именно там удобно собирать событие аудита.
 	h := handler.New(metricsService, dbPool, auditNotifier)
 
-	var stopStore chan struct{}
+	var (
+		stopStore context.CancelFunc
+		storeWG   sync.WaitGroup
+	)
 	if fileStorage != nil && cfg.Storage.StoreInterval > 0 {
-		stopStore = make(chan struct{})
+		storeCtx, cancelStore := context.WithCancel(context.Background())
+		stopStore = cancelStore
+		storeWG.Add(1)
 		go func() {
+			defer storeWG.Done()
 			ticker := time.NewTicker(time.Duration(cfg.Storage.StoreInterval) * time.Second)
 			defer ticker.Stop()
 			for {
@@ -163,7 +174,7 @@ func main() {
 					if err := fileStorage.Save(); err != nil {
 						myLog.Log.Error("periodic store failure", zap.Error(err))
 					}
-				case <-stopStore:
+				case <-storeCtx.Done():
 					return
 				}
 			}
@@ -171,17 +182,52 @@ func main() {
 	}
 
 	router := buildRouter(h, cfg.Server.Key, privateKey)
+	server := &http.Server{
+		Addr:    cfg.Server.RunAddr,
+		Handler: router,
+	}
+	serverErr := make(chan error, 1)
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stopSignals()
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
-	err := http.ListenAndServe(cfg.Server.RunAddr, router)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("could not start server: %v", err)
+		}
+	case <-signalCtx.Done():
+		myLog.Log.Info("shutdown signal received")
+
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelShutdown()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			myLog.Log.Error("server shutdown failure", zap.Error(err))
+			if closeErr := server.Close(); closeErr != nil {
+				myLog.Log.Error("server close failure", zap.Error(closeErr))
+			}
+		}
+
+		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			myLog.Log.Error("server stopped with error", zap.Error(err))
+		}
+	}
+
 	if stopStore != nil {
-		close(stopStore)
+		stopStore()
+		storeWG.Wait()
 		if err := fileStorage.Save(); err != nil {
 			myLog.Log.Error("final store failure", zap.Error(err))
 		}
 	}
-	if err != nil {
-		log.Fatalf("could not start server: %v", err)
+
+	if dbPool != nil {
+		dbPool.Close()
 	}
 }

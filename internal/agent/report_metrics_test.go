@@ -30,7 +30,7 @@ func runJobs(jobs <-chan Job) {
 		if job == nil {
 			continue
 		}
-		_ = job()
+		_ = job(context.Background())
 	}
 }
 
@@ -47,7 +47,7 @@ func TestSendMetricSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -73,7 +73,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -94,7 +94,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		SetBaseURL("http://example.com").
 		SetTransport(errorRoundTripper{err: errors.New("boom")})
 
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -131,7 +131,9 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", nil, jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -180,7 +182,9 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", nil, jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -240,7 +244,9 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "", nil, jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatJSON, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -321,7 +327,9 @@ func TestReportMetricsEncryptsJSONBatch(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", &privateKey.PublicKey, jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", &privateKey.PublicKey, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 

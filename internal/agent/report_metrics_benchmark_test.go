@@ -36,7 +36,9 @@ func BenchmarkReportMetricsJSONScheduling(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ReportMetrics(nil, store, ReportFormatJSON, "", nil, jobs)
+		if err := ReportMetrics(context.Background(), nil, store, ReportFormatJSON, "", nil, jobs); err != nil {
+			b.Fatalf("ReportMetrics() error = %v", err)
+		}
 		<-jobs
 	}
 }

@@ -42,11 +42,13 @@ func TestEncryptedAgentRequestThroughServerRouter(t *testing.T) {
 	jobs := make(chan agent.Job, 10)
 	client := resty.New().SetBaseURL(ts.URL)
 
-	agent.ReportMetrics(client, agentStore, agent.ReportFormatPlain, hashKey, &privateKey.PublicKey, jobs)
+	if err := agent.ReportMetrics(ctx, client, agentStore, agent.ReportFormatPlain, hashKey, &privateKey.PublicKey, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 
 	for job := range jobs {
-		if err := job(); err != nil {
+		if err := job(ctx); err != nil {
 			t.Fatalf("job() error = %v", err)
 		}
 	}

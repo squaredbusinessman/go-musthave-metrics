@@ -62,11 +62,16 @@ func isRetryableNetErr(err error) bool {
 }
 
 // SendMetric - отправляет одну метрику по пути /update/{type}/{name}/{value}.
-func SendMetric(client *resty.Client, m models.Metric, key string) error {
+func SendMetric(ctx context.Context, client *resty.Client, m models.Metric, key string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	postPath := path.Join("update", string(m.Type), m.Name, m.Value)
 
-	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
+	if err := retry.Do(ctx, isRetryableNetErr, func() error {
 		req := client.R().
+			SetContext(ctx).
 			SetHeader("Content-Type", "text/plain")
 		if key != "" {
 			req.SetHeader("HashSHA256", sha256hex(nil, key))
@@ -91,7 +96,11 @@ func SendMetric(client *resty.Client, m models.Metric, key string) error {
 	return nil
 }
 
-func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key string, publicKey *rsa.PublicKey) error {
+func sendMetricsBatchJSON(ctx context.Context, client *resty.Client, metrics []models.Metrics, key string, publicKey *rsa.PublicKey) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -115,8 +124,9 @@ func sendMetricsBatchJSON(client *resty.Client, metrics []models.Metrics, key st
 		encrypted = true
 	}
 
-	if err := retry.Do(context.Background(), isRetryableNetErr, func() error {
+	if err := retry.Do(ctx, isRetryableNetErr, func() error {
 		req := client.R().
+			SetContext(ctx).
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Content-Encoding", "gzip").
 			SetBody(body)
@@ -180,51 +190,69 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 }
 
 // ReportMetrics - ставит в очередь отправку всех накопленных метрик.
-func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job) {
+func ReportMetrics(ctx context.Context, client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	format := normalizeReportFormat(reportFormat)
 	if publicKey != nil {
 		format = ReportFormatJSON
 	}
 
-	gauges, counters, err := store.Snapshot(context.Background())
+	gauges, counters, err := store.Snapshot(ctx)
 	if err != nil {
 		myLog.Log.Warn("Failed to snapshot metrics", zap.Error(err))
-		return
+		return err
 	}
 
 	if format == ReportFormatJSON {
 		metrics := snapshotToMetrics(gauges, counters)
 		if len(metrics) == 0 {
-			return
+			return nil
 		}
 
-		jobs <- func() error {
-			return sendMetricsBatchJSON(client, metrics, key, publicKey)
+		select {
+		case jobs <- func(jobCtx context.Context) error {
+			return sendMetricsBatchJSON(jobCtx, client, metrics, key, publicKey)
+		}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		return
 	}
 
 	for name, value := range gauges {
 		n := name
 		v := value.Value
-		jobs <- func() error {
-			return SendMetric(client, models.Metric{
+		select {
+		case jobs <- func(jobCtx context.Context) error {
+			return SendMetric(jobCtx, client, models.Metric{
 				Type:  models.MetricTypeGauge,
 				Name:  n,
 				Value: strconv.FormatFloat(v, 'f', -1, 64),
 			}, key)
+		}:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
 	for name, value := range counters {
 		n := name
 		v := value.Value
-		jobs <- func() error {
-			return SendMetric(client, models.Metric{
+		select {
+		case jobs <- func(jobCtx context.Context) error {
+			return SendMetric(jobCtx, client, models.Metric{
 				Type:  models.MetricTypeCounter,
 				Name:  n,
 				Value: strconv.FormatInt(v, 10),
 			}, key)
+		}:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+
+	return nil
 }
