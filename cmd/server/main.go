@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"errors"
-	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -97,7 +98,7 @@ func main() {
 	// сразу используем пул в будущем эффективнее переиспользовать соединения
 	// и распределять ресурсы
 	case cfg.Database.DSN != "":
-		pool, err := pgxpool.New(context.Background(), cfg.Database.DSN)
+		pool, err := newDBPool(context.Background(), cfg.Database.DSN)
 		if err != nil {
 			log.Fatalf("db pool init failure: %v", err)
 		}
