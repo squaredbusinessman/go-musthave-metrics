@@ -12,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
@@ -28,6 +27,10 @@ var (
 )
 
 const shutdownTimeout = 15 * time.Second
+const timeout = 5 * time.Second
+const retryCount = 3
+const waitTime = 1 * time.Second
+const maxWaitTime = 5 * time.Second
 
 func main() {
 	buildinfo.Print(os.Stdout, buildVersion, buildDate, buildCommit)
@@ -57,9 +60,8 @@ func main() {
 	store := storage.NewMemStorage()
 	randS := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	client := resty.New().
-		SetBaseURL("http://" + cfg.Addr).
-		SetTimeout(5 * time.Second)
+	client := agent.NewHTTPClient(cfg.Addr, timeout, retryCount, waitTime, maxWaitTime)
+
 	defer client.GetClient().CloseIdleConnections()
 
 	runCtx, stopRun := context.WithCancel(context.Background())
