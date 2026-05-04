@@ -85,6 +85,30 @@ func TestParseConfigArgsTrustedSubnetFromEnv(t *testing.T) {
 	}
 }
 
+func TestParseConfigArgsGRPCAddressFromFlag(t *testing.T) {
+	cfg, err := parseConfigArgs([]string{"-g", ":3300"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.GRPCAddr, ":3300"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsGRPCAddressFromEnv(t *testing.T) {
+	t.Setenv("GRPC_ADDRESS", ":3400")
+
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.GRPCAddr, ":3400"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
+	}
+}
+
 func TestParseConfigArgsRejectsInvalidTrustedSubnet(t *testing.T) {
 	if _, err := parseConfigArgs([]string{"-t", "not-a-cidr"}); err == nil {
 		t.Fatalf("expected invalid trusted subnet error")
@@ -95,6 +119,7 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "server-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3300",
 		"log_level": "debug",
 		"key": "secret",
 		"restore": false,
@@ -117,6 +142,9 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Server.RunAddr, "localhost:9090"; got != want {
 		t.Fatalf("Server.RunAddr = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.GRPCAddr, "localhost:3300"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.Server.LogLevel, "debug"; got != want {
 		t.Fatalf("Server.LogLevel = %q, want %q", got, want)
@@ -157,6 +185,7 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "server-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3300",
 		"restore": false,
 		"store_interval": "5s",
 		"store_file": "/tmp/from-config.json",
@@ -169,6 +198,7 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	}
 
 	t.Setenv("ADDRESS", "localhost:7070")
+	t.Setenv("GRPC_ADDRESS", "localhost:3400")
 	t.Setenv("DATABASE_DSN", "postgres://env/db")
 	t.Setenv("TRUSTED_SUBNET", "10.0.0.0/8")
 
@@ -185,6 +215,9 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Server.RunAddr, "localhost:7070"; got != want {
 		t.Fatalf("Server.RunAddr = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.GRPCAddr, "localhost:3400"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.Storage.Restore, true; got != want {
 		t.Fatalf("Storage.Restore = %v, want %v", got, want)

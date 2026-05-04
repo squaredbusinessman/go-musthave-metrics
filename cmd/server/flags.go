@@ -28,6 +28,7 @@ type DBConfig struct {
 // ServerConfig - сетевые и общие настройки HTTP-сервера.
 type ServerConfig struct {
 	RunAddr       string `env:"ADDRESS"`
+	GRPCAddr      string `env:"GRPC_ADDRESS"`
 	LogLevel      string `env:"LOG_LEVEL"`
 	Key           string `env:"KEY"`
 	TrustedSubnet string `env:"TRUSTED_SUBNET"`
@@ -54,6 +55,7 @@ type CryptoConfig struct {
 
 type fileConfig struct {
 	Address       *string                    `json:"address"`
+	GRPCAddress   *string                    `json:"grpc_address"`
 	LogLevel      *string                    `json:"log_level"`
 	Key           *string                    `json:"key"`
 	Restore       *bool                      `json:"restore"`
@@ -78,6 +80,7 @@ func parseConfigArgs(args []string) (Config, error) {
 	cfg := Config{
 		Server: ServerConfig{
 			RunAddr:  ":8080",
+			GRPCAddr: ":3200",
 			LogLevel: "info",
 		},
 		Storage: StorageConfig{
@@ -105,6 +108,7 @@ func parseConfigArgs(args []string) (Config, error) {
 	fs.SetOutput(io.Discard)
 
 	fs.StringVar(&cfg.Server.RunAddr, "a", cfg.Server.RunAddr, "Run server address")
+	fs.StringVar(&cfg.Server.GRPCAddr, "g", cfg.Server.GRPCAddr, "Run gRPC server address")
 	fs.StringVar(&cfg.Server.LogLevel, "l", cfg.Server.LogLevel, "log level")
 	fs.StringVar(&cfg.Server.Key, "k", cfg.Server.Key, "Hash key")
 	fs.StringVar(&cfg.Server.TrustedSubnet, "t", cfg.Server.TrustedSubnet, "trusted subnet in CIDR notation")
@@ -169,6 +173,9 @@ func parseConfigArgs(args []string) (Config, error) {
 func (fc fileConfig) apply(cfg *Config) {
 	if fc.Address != nil {
 		cfg.Server.RunAddr = *fc.Address
+	}
+	if fc.GRPCAddress != nil {
+		cfg.Server.GRPCAddr = *fc.GRPCAddress
 	}
 	if fc.LogLevel != nil {
 		cfg.Server.LogLevel = *fc.LogLevel
