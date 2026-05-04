@@ -1,6 +1,6 @@
 module github.com/squaredbusinessman/go-musthave-metrics
 
-go 1.25.5
+go 1.26
 
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0

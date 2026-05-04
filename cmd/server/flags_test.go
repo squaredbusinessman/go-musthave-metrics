@@ -61,6 +61,36 @@ func TestParseConfigArgsCryptoKeyFromEnv(t *testing.T) {
 	}
 }
 
+func TestParseConfigArgsTrustedSubnetFromFlag(t *testing.T) {
+	cfg, err := parseConfigArgs([]string{"-t", "192.168.1.0/24"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.TrustedSubnet, "192.168.1.0/24"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsTrustedSubnetFromEnv(t *testing.T) {
+	t.Setenv("TRUSTED_SUBNET", "10.10.0.0/16")
+
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.TrustedSubnet, "10.10.0.0/16"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsRejectsInvalidTrustedSubnet(t *testing.T) {
+	if _, err := parseConfigArgs([]string{"-t", "not-a-cidr"}); err == nil {
+		t.Fatalf("expected invalid trusted subnet error")
+	}
+}
+
 func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "server-config.json")
 	configData := []byte(`{
@@ -73,7 +103,8 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 		"database_dsn": "postgres://localhost/db",
 		"audit_file": "/tmp/audit.log",
 		"audit_url": "http://localhost:8081/audit",
-		"crypto_key": "/tmp/private.pem"
+		"crypto_key": "/tmp/private.pem",
+		"trusted_subnet": "172.16.0.0/12"
 	}`)
 	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -117,6 +148,9 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	if got, want := cfg.Crypto.KeyPath, "/tmp/private.pem"; got != want {
 		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
 	}
+	if got, want := cfg.Server.TrustedSubnet, "172.16.0.0/12"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
 }
 
 func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
@@ -127,7 +161,8 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 		"store_interval": "5s",
 		"store_file": "/tmp/from-config.json",
 		"database_dsn": "postgres://config/db",
-		"crypto_key": "/tmp/config.pem"
+		"crypto_key": "/tmp/config.pem",
+		"trusted_subnet": "172.16.0.0/12"
 	}`)
 	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -135,6 +170,7 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 
 	t.Setenv("ADDRESS", "localhost:7070")
 	t.Setenv("DATABASE_DSN", "postgres://env/db")
+	t.Setenv("TRUSTED_SUBNET", "10.0.0.0/8")
 
 	cfg, err := parseConfigArgs([]string{
 		"-c", configPath,
@@ -167,5 +203,8 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	}
 	if got, want := cfg.Crypto.KeyPath, "/tmp/flag.pem"; got != want {
 		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.TrustedSubnet, "10.0.0.0/8"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
 	}
 }

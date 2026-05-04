@@ -35,10 +35,11 @@ func runJobs(jobs <-chan Job) {
 }
 
 func TestSendMetricSuccess(t *testing.T) {
-	var receivedPath, receivedContentType string
+	var receivedPath, receivedContentType, receivedRealIP string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedPath = r.URL.Path
 		receivedContentType = r.Header.Get("Content-Type")
+		receivedRealIP = r.Header.Get(headerXRealIP)
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
@@ -63,6 +64,10 @@ func TestSendMetricSuccess(t *testing.T) {
 
 	if receivedContentType != "text/plain" {
 		t.Fatalf("content type = %s, want text/plain", receivedContentType)
+	}
+
+	if receivedRealIP == "" {
+		t.Fatalf("%s header is empty", headerXRealIP)
 	}
 }
 
@@ -220,6 +225,9 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 		}
 		if enc := r.Header.Get("Content-Encoding"); enc != "gzip" {
 			t.Fatalf("Content-Encoding = %s, want gzip", enc)
+		}
+		if realIP := r.Header.Get(headerXRealIP); realIP == "" {
+			t.Fatalf("%s header is empty", headerXRealIP)
 		}
 
 		reader, err := gzip.NewReader(r.Body)

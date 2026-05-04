@@ -42,7 +42,7 @@ const (
 	serverIdleTimeout       = 60 * time.Second
 )
 
-func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
+func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey, trustedSubnet string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.StripSlashes)
 
@@ -69,6 +69,7 @@ func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) htt
 		middleware.HashMiddleware(key),
 		middleware.GzipMiddleware,
 		middleware.CryptoMiddleware(privateKey),
+		middleware.TrustedSubnetMiddleware(trustedSubnet),
 	)
 }
 
@@ -188,7 +189,7 @@ func main() {
 		}()
 	}
 
-	router := buildRouter(h, cfg.Server.Key, privateKey)
+	router := buildRouter(h, cfg.Server.Key, privateKey, cfg.Server.TrustedSubnet)
 	server := &http.Server{
 		Addr:              cfg.Server.RunAddr,
 		Handler:           router,

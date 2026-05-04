@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rsa"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,58 @@ func RequestLogger(next http.Handler) http.Handler {
 			zap.Duration("latency", time.Since(start)),
 		)
 	})
+}
+
+// TrustedSubnetMiddleware разрешает запись метрик только из доверенной подсети.
+func TrustedSubnetMiddleware(trustedSubnet string) Middleware {
+	if trustedSubnet == "" {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	_, subnet, err := net.ParseCIDR(trustedSubnet)
+	if err != nil {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if isMetricWriteRequest(request) {
+					http.Error(writer, "forbidden", http.StatusForbidden)
+					return
+				}
+				next.ServeHTTP(writer, request)
+			})
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if !isMetricWriteRequest(request) {
+				next.ServeHTTP(writer, request)
+				return
+			}
+
+			ip := net.ParseIP(strings.TrimSpace(request.Header.Get("X-Real-IP")))
+			if ip == nil || !subnet.Contains(ip) {
+				http.Error(writer, "forbidden", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(writer, request)
+		})
+	}
+}
+
+func isMetricWriteRequest(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodPost {
+		return false
+	}
+
+	requestPath := request.URL.Path
+	return requestPath == "/update" ||
+		requestPath == "/update/" ||
+		strings.HasPrefix(requestPath, "/update/") ||
+		requestPath == "/updates" ||
+		requestPath == "/updates/"
 }
 
 // GzipMiddleware - распаковывает gzip-запросы и сжимает gzip-ответы.

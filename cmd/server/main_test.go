@@ -29,7 +29,7 @@ func TestEncryptedAgentRequestThroughServerRouter(t *testing.T) {
 	metricsService := service.NewMetricsService(serverStore)
 	h := handler.New(metricsService, nil, nil)
 
-	ts := httptest.NewServer(buildRouter(h, hashKey, privateKey))
+	ts := httptest.NewServer(buildRouter(h, hashKey, privateKey, ""))
 	defer ts.Close()
 
 	agentStore := repository.NewMemStorage()
