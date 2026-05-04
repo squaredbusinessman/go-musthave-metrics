@@ -121,7 +121,7 @@ func main() {
 				return
 			case <-ticker.C:
 				if err := agent.ReportMetrics(runCtx, client, store, cfg.ReportFormat, cfg.Key, publicKey, jobs); err != nil && runCtx.Err() == nil {
-					myLog.Log.Warn("report metrics failure", zap.Error(err))
+					myLog.Log.Error("report metrics failure", zap.Error(err))
 				}
 			}
 		}
