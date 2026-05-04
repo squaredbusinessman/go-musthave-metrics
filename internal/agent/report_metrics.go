@@ -62,9 +62,13 @@ func isRetryableNetErr(err error) bool {
 }
 
 // SendMetric - отправляет одну метрику по пути /update/{type}/{name}/{value}.
-func SendMetric(ctx context.Context, client *resty.Client, m models.Metric, key string) error {
+func SendMetric(ctx context.Context, client *resty.Client, m *models.Metric, key string) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+
+	if m == nil {
+		return errors.New("metric must not be nil")
 	}
 
 	postPath := path.Join("update", string(m.Type), m.Name, m.Value)
@@ -227,7 +231,7 @@ func ReportMetrics(ctx context.Context, client *resty.Client, store *storage.Mem
 		v := value.Value
 		select {
 		case jobs <- func(jobCtx context.Context) error {
-			return SendMetric(jobCtx, client, models.Metric{
+			return SendMetric(jobCtx, client, &models.Metric{
 				Type:  models.MetricTypeGauge,
 				Name:  n,
 				Value: strconv.FormatFloat(v, 'f', -1, 64),
@@ -243,7 +247,7 @@ func ReportMetrics(ctx context.Context, client *resty.Client, store *storage.Mem
 		v := value.Value
 		select {
 		case jobs <- func(jobCtx context.Context) error {
-			return SendMetric(jobCtx, client, models.Metric{
+			return SendMetric(jobCtx, client, &models.Metric{
 				Type:  models.MetricTypeCounter,
 				Name:  n,
 				Value: strconv.FormatInt(v, 10),

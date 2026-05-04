@@ -47,7 +47,7 @@ func TestSendMetricSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(context.Background(), client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -73,7 +73,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(context.Background(), client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -94,7 +94,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		SetBaseURL("http://example.com").
 		SetTransport(errorRoundTripper{err: errors.New("boom")})
 
-	err := SendMetric(context.Background(), client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
