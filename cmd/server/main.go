@@ -34,7 +34,13 @@ var (
 	buildCommit  string
 )
 
-const shutdownTimeout = 15 * time.Second
+const (
+	shutdownTimeout         = 15 * time.Second
+	serverReadHeaderTimeout = 2 * time.Second
+	serverReadTimeout       = 5 * time.Second
+	serverWriteTimeout      = 10 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+)
 
 func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
 	r := chi.NewRouter()
@@ -184,8 +190,12 @@ func main() {
 
 	router := buildRouter(h, cfg.Server.Key, privateKey)
 	server := &http.Server{
-		Addr:    cfg.Server.RunAddr,
-		Handler: router,
+		Addr:              cfg.Server.RunAddr,
+		Handler:           router,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
 	}
 	serverErr := make(chan error, 1)
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
