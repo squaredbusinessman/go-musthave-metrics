@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
@@ -40,7 +41,7 @@ func TestEncryptedAgentRequestThroughServerRouter(t *testing.T) {
 	}
 
 	jobs := make(chan agent.Job, 10)
-	client := resty.New().SetBaseURL(ts.URL)
+	client := resty.New().SetBaseURL(ts.URL).SetTimeout(5 * time.Second)
 
 	if err := agent.ReportMetrics(ctx, client, agentStore, agent.ReportFormatPlain, hashKey, &privateKey.PublicKey, jobs); err != nil {
 		t.Fatalf("ReportMetrics() error = %v", err)
