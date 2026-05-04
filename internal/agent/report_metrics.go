@@ -63,10 +63,6 @@ func isRetryableNetErr(err error) bool {
 
 // SendMetric - отправляет одну метрику по пути /update/{type}/{name}/{value}.
 func SendMetric(ctx context.Context, client *resty.Client, m *models.Metric, key string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	if m == nil {
 		return errors.New("metric must not be nil")
 	}
@@ -101,10 +97,6 @@ func SendMetric(ctx context.Context, client *resty.Client, m *models.Metric, key
 }
 
 func sendMetricsBatchJSON(ctx context.Context, client *resty.Client, metrics []models.Metrics, key string, publicKey *rsa.PublicKey) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	if len(metrics) == 0 {
 		return nil
 	}
@@ -195,10 +187,6 @@ func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]model
 
 // ReportMetrics - ставит в очередь отправку всех накопленных метрик.
 func ReportMetrics(ctx context.Context, client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	format := normalizeReportFormat(reportFormat)
 	if publicKey != nil {
 		format = ReportFormatJSON
