@@ -3,10 +3,15 @@ package middleware
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 )
 
 func TestGzipMiddlewareCompressesResponse(t *testing.T) {
@@ -97,5 +102,99 @@ func TestGzipMiddlewareDecompressesRequest(t *testing.T) {
 
 	if received != payload {
 		t.Fatalf("handler received %q, want %q", received, payload)
+	}
+}
+
+func TestCryptoMiddlewareDecryptsRequest(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	plaintext := []byte(`{"ok":true}`)
+
+	encrypted, err := cryptoutil.Encrypt(&privateKey.PublicKey, plaintext)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	var gotBody []byte
+
+	handler := CryptoMiddleware(privateKey)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+
+		if enc := r.Header.Get("Content-Encryption"); enc != "" {
+			t.Fatalf("Content-Encryption = %q, want empty", enc)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(encrypted))
+	req.Header.Set("Content-Encryption", "rsa-aes-gcm")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if !bytes.Equal(gotBody, plaintext) {
+		t.Fatalf("body = %q, want %q", gotBody, plaintext)
+	}
+}
+
+// тест на порядок исполнения мидлварин
+func TestCryptoMiddlewareBeforeGzipMiddleware(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	payload := []byte(`{"id":"Alloc","type":"gauge","value":42.5}`)
+
+	var gzipped bytes.Buffer
+	zw := gzip.NewWriter(&gzipped)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatalf("write gzip: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	encrypted, err := cryptoutil.Encrypt(&privateKey.PublicKey, gzipped.Bytes())
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	var got map[string]any
+
+	handler := CryptoMiddleware(privateKey)(
+		GzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+				t.Fatalf("decode json: %v", err)
+			}
+
+			w.WriteHeader(http.StatusOK)
+		})),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(encrypted))
+	req.Header.Set("Content-Encryption", "rsa-aes-gcm")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	if got["id"] != "Alloc" {
+		t.Fatalf("id = %v, want Alloc", got["id"])
 	}
 }

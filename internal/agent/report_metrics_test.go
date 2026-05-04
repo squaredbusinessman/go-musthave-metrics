@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	models "github.com/squaredbusinessman/go-musthave-metrics/internal/model"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 )
@@ -25,7 +30,7 @@ func runJobs(jobs <-chan Job) {
 		if job == nil {
 			continue
 		}
-		_ = job()
+		_ = job(context.Background())
 	}
 }
 
@@ -42,7 +47,7 @@ func TestSendMetricSuccess(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -68,7 +73,7 @@ func TestSendMetricBadStatus(t *testing.T) {
 	defer ts.Close()
 
 	client := newTestClient(ts)
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -89,7 +94,7 @@ func TestSendMetricHTTPError(t *testing.T) {
 		SetBaseURL("http://example.com").
 		SetTransport(errorRoundTripper{err: errors.New("boom")})
 
-	err := SendMetric(client, models.Metric{
+	err := SendMetric(context.Background(), client, &models.Metric{
 		Type:  "gauge",
 		Name:  "Alloc",
 		Value: "10",
@@ -126,7 +131,9 @@ func TestReportMetricsSendsAllValues(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -175,7 +182,9 @@ func TestReportMetricsContinuesAfterError(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatPlain, "", jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -235,7 +244,9 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	defer ts.Close()
 
 	jobs := make(chan Job, 100)
-	ReportMetrics(newTestClient(ts), store, ReportFormatJSON, "", jobs)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatJSON, "", nil, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
 	close(jobs)
 	runJobs(jobs)
 
@@ -258,5 +269,79 @@ func TestReportMetricsJSONFormat(t *testing.T) {
 	counter, ok := payloads["PollCount"]
 	if !ok || counter.Delta == nil || *counter.Delta != 3 {
 		t.Fatalf("counter payload mismatch: %+v", counter)
+	}
+}
+
+func TestReportMetricsEncryptsJSONBatch(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	store := storage.NewMemStorage()
+	ctx := context.Background()
+	if err := store.SetGauge(ctx, "Alloc", models.Gauge{Value: 2.5}); err != nil {
+		t.Fatalf("SetGauge() error = %v", err)
+	}
+
+	var gotMetric models.Metrics
+	var gotPath string
+	var gotEncryption string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotEncryption = r.Header.Get("Content-Encryption")
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+
+		if bytes.Contains(body, []byte("Alloc")) {
+			t.Fatal("encrypted body contains plaintext metric name")
+		}
+
+		decrypted, err := cryptoutil.Decrypt(privateKey, body)
+		if err != nil {
+			t.Fatalf("decrypt body: %v", err)
+		}
+
+		reader, err := gzip.NewReader(bytes.NewReader(decrypted))
+		if err != nil {
+			t.Fatalf("create gzip reader: %v", err)
+		}
+		defer reader.Close()
+
+		var batch []models.Metrics
+		if err := json.NewDecoder(reader).Decode(&batch); err != nil {
+			t.Fatalf("decode json: %v", err)
+		}
+
+		if len(batch) != 1 {
+			t.Fatalf("batch len = %d, want 1", len(batch))
+		}
+
+		gotMetric = batch[0]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	jobs := make(chan Job, 100)
+	if err := ReportMetrics(context.Background(), newTestClient(ts), store, ReportFormatPlain, "", &privateKey.PublicKey, jobs); err != nil {
+		t.Fatalf("ReportMetrics() error = %v", err)
+	}
+	close(jobs)
+	runJobs(jobs)
+
+	if gotPath != "/updates" {
+		t.Fatalf("path = %s, want /updates", gotPath)
+	}
+
+	if gotEncryption != "rsa-aes-gcm" {
+		t.Fatalf("Content-Encryption = %s, want rsa-aes-gcm", gotEncryption)
+	}
+
+	if gotMetric.ID != "Alloc" || gotMetric.Value == nil || *gotMetric.Value != 2.5 {
+		t.Fatalf("metric mismatch: %+v", gotMetric)
 	}
 }

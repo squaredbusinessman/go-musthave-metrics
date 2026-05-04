@@ -2,10 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
+
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -27,7 +34,15 @@ var (
 	buildCommit  string
 )
 
-func buildRouter(h *handler.Handler, key string) http.Handler {
+const (
+	shutdownTimeout         = 15 * time.Second
+	serverReadHeaderTimeout = 2 * time.Second
+	serverReadTimeout       = 5 * time.Second
+	serverWriteTimeout      = 10 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+)
+
+func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.StripSlashes)
 
@@ -47,7 +62,14 @@ func buildRouter(h *handler.Handler, key string) http.Handler {
 	// проверка соединения с БД
 	r.Get("/ping", h.Ping)
 
-	return middleware.Conveyor(r, middleware.RequestLogger, middleware.HashMiddleware(key), middleware.GzipMiddleware)
+	// не забыть что конвейер работает с миддлварами в обратном порядке
+	return middleware.Conveyor(
+		r,
+		middleware.RequestLogger,
+		middleware.HashMiddleware(key),
+		middleware.GzipMiddleware,
+		middleware.CryptoMiddleware(privateKey),
+	)
 }
 
 func main() {
@@ -66,19 +88,27 @@ func main() {
 		store       repository.Storage
 		fileStorage *repository.FileStorage
 		dbPool      *pgxpool.Pool
+		privateKey  *rsa.PrivateKey
 	)
+
+	if cfg.Crypto.KeyPath != "" {
+		var err error
+		privateKey, err = cryptoutil.LoadPrivateKey(cfg.Crypto.KeyPath)
+		if err != nil {
+			log.Fatalf("load private key failure: %v", err)
+		}
+	}
 
 	switch {
 	// Подключаемся к postgreSQL через драйвер pgx,
 	// сразу используем пул в будущем эффективнее переиспользовать соединения
 	// и распределять ресурсы
 	case cfg.Database.DSN != "":
-		pool, err := pgxpool.New(context.Background(), cfg.Database.DSN)
+		pool, err := newDBPool(context.Background(), cfg.Database.DSN)
 		if err != nil {
 			log.Fatalf("db pool init failure: %v", err)
 		}
 		dbPool = pool
-		defer dbPool.Close()
 
 		if err = migrations.Up(dbPool, "migrations"); err != nil {
 			myLog.Log.Error("migrations failure", zap.Error(err))
@@ -133,10 +163,16 @@ func main() {
 	// Хендлер знает HTTP-контекст запроса, поэтому именно там удобно собирать событие аудита.
 	h := handler.New(metricsService, dbPool, auditNotifier)
 
-	var stopStore chan struct{}
+	var (
+		stopStore context.CancelFunc
+		storeWG   sync.WaitGroup
+	)
 	if fileStorage != nil && cfg.Storage.StoreInterval > 0 {
-		stopStore = make(chan struct{})
+		storeCtx, cancelStore := context.WithCancel(context.Background())
+		stopStore = cancelStore
+		storeWG.Add(1)
 		go func() {
+			defer storeWG.Done()
 			ticker := time.NewTicker(time.Duration(cfg.Storage.StoreInterval) * time.Second)
 			defer ticker.Stop()
 			for {
@@ -145,25 +181,64 @@ func main() {
 					if err := fileStorage.Save(); err != nil {
 						myLog.Log.Error("periodic store failure", zap.Error(err))
 					}
-				case <-stopStore:
+				case <-storeCtx.Done():
 					return
 				}
 			}
 		}()
 	}
 
-	router := buildRouter(h, cfg.Server.Key)
+	router := buildRouter(h, cfg.Server.Key, privateKey)
+	server := &http.Server{
+		Addr:              cfg.Server.RunAddr,
+		Handler:           router,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+	}
+	serverErr := make(chan error, 1)
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stopSignals()
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
-	err := http.ListenAndServe(cfg.Server.RunAddr, router)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("could not start server: %v", err)
+		}
+	case <-signalCtx.Done():
+		myLog.Log.Info("shutdown signal received")
+
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelShutdown()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			myLog.Log.Error("server shutdown failure", zap.Error(err))
+			if closeErr := server.Close(); closeErr != nil {
+				myLog.Log.Error("server close failure", zap.Error(closeErr))
+			}
+		}
+
+		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			myLog.Log.Error("server stopped with error", zap.Error(err))
+		}
+	}
+
 	if stopStore != nil {
-		close(stopStore)
+		stopStore()
+		storeWG.Wait()
 		if err := fileStorage.Save(); err != nil {
 			myLog.Log.Error("final store failure", zap.Error(err))
 		}
 	}
-	if err != nil {
-		log.Fatalf("could not start server: %v", err)
+
+	if dbPool != nil {
+		dbPool.Close()
 	}
 }
