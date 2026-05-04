@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,13 +20,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/grpcserver"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
+	pb "github.com/squaredbusinessman/go-musthave-metrics/internal/proto"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 	"github.com/squaredbusinessman/go-musthave-metrics/migrations"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -198,26 +202,52 @@ func main() {
 		WriteTimeout:      serverWriteTimeout,
 		IdleTimeout:       serverIdleTimeout,
 	}
-	serverErr := make(chan error, 1)
+
+	grpcListener, err := net.Listen("tcp", cfg.Server.GRPCAddr)
+	if err != nil {
+		log.Fatalf("could not listen gRPC address %s: %v", cfg.Server.GRPCAddr, err)
+	}
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(cfg.Server.TrustedSubnet)),
+	)
+	pb.RegisterMetricsServer(grpcServer, grpcserver.New(metricsService))
+
+	httpServerErr := make(chan error, 1)
+	grpcServerErr := make(chan error, 1)
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stopSignals()
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
 	go func() {
-		serverErr <- server.ListenAndServe()
+		httpServerErr <- server.ListenAndServe()
+	}()
+
+	myLog.Log.Info("Running gRPC server on: ", zap.String("address", cfg.Server.GRPCAddr))
+	go func() {
+		grpcServerErr <- grpcServer.Serve(grpcListener)
 	}()
 
 	select {
-	case err := <-serverErr:
+	case err := <-httpServerErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("could not start server: %v", err)
+		}
+	case err := <-grpcServerErr:
+		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			log.Fatalf("could not start gRPC server: %v", err)
 		}
 	case <-signalCtx.Done():
 		myLog.Log.Info("shutdown signal received")
 
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancelShutdown()
+
+		grpcStopped := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(grpcStopped)
+		}()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			myLog.Log.Error("server shutdown failure", zap.Error(err))
@@ -226,8 +256,19 @@ func main() {
 			}
 		}
 
-		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := <-httpServerErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			myLog.Log.Error("server stopped with error", zap.Error(err))
+		}
+
+		select {
+		case <-grpcStopped:
+		case <-shutdownCtx.Done():
+			grpcServer.Stop()
+			<-grpcStopped
+		}
+
+		if err := <-grpcServerErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			myLog.Log.Error("gRPC server stopped with error", zap.Error(err))
 		}
 	}
 
