@@ -101,7 +101,9 @@ func CryptoMiddleware(privateKey *rsa.PrivateKey) Middleware {
 				return
 			}
 
-			_ = request.Body.Close()
+			if err = request.Body.Close(); err != nil {
+				logger.Log.Warn("failed to close request body", zap.Error(err))
+			}
 
 			decrypted, err := cryptoutil.Decrypt(privateKey, body)
 			if err != nil {
@@ -134,7 +136,11 @@ func HashMiddleware(key string) Middleware {
 					http.Error(writer, "bad request", http.StatusBadRequest)
 					return
 				}
-				_ = request.Body.Close()
+
+				if err = request.Body.Close(); err != nil {
+					logger.Log.Warn("failed to close request body", zap.Error(err))
+				}
+
 				computed := sha256hex(body, key)
 				if !strings.EqualFold(got, computed) {
 					http.Error(writer, "bad hash", http.StatusBadRequest)
