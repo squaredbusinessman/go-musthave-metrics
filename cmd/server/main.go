@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,13 +20,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/audit"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
+	"github.com/squaredbusinessman/go-musthave-metrics/internal/grpcserver"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/handler"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/middleware"
+	pb "github.com/squaredbusinessman/go-musthave-metrics/internal/proto"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/service"
 	"github.com/squaredbusinessman/go-musthave-metrics/migrations"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -42,7 +46,7 @@ const (
 	serverIdleTimeout       = 60 * time.Second
 )
 
-func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler {
+func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey, trustedSubnet string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.StripSlashes)
 
@@ -69,6 +73,7 @@ func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) htt
 		middleware.HashMiddleware(key),
 		middleware.GzipMiddleware,
 		middleware.CryptoMiddleware(privateKey),
+		middleware.TrustedSubnetMiddleware(trustedSubnet),
 	)
 }
 
@@ -188,7 +193,7 @@ func main() {
 		}()
 	}
 
-	router := buildRouter(h, cfg.Server.Key, privateKey)
+	router := buildRouter(h, cfg.Server.Key, privateKey, cfg.Server.TrustedSubnet)
 	server := &http.Server{
 		Addr:              cfg.Server.RunAddr,
 		Handler:           router,
@@ -197,20 +202,44 @@ func main() {
 		WriteTimeout:      serverWriteTimeout,
 		IdleTimeout:       serverIdleTimeout,
 	}
-	serverErr := make(chan error, 1)
+
+	httpServerErr := make(chan error, 1)
+	var grpcServer *grpc.Server
+	var grpcServerErr chan error
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stopSignals()
 
 	// активируем логирование запросов
 	myLog.Log.Info("Running server on: ", zap.String("address", cfg.Server.RunAddr))
 	go func() {
-		serverErr <- server.ListenAndServe()
+		httpServerErr <- server.ListenAndServe()
 	}()
 
+	if cfg.Server.GRPCAddr != "" {
+		grpcListener, err := net.Listen("tcp", cfg.Server.GRPCAddr)
+		if err != nil {
+			log.Fatalf("could not listen gRPC address %s: %v", cfg.Server.GRPCAddr, err)
+		}
+		grpcServer = grpc.NewServer(
+			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(cfg.Server.TrustedSubnet)),
+		)
+		pb.RegisterMetricsServer(grpcServer, grpcserver.New(metricsService))
+
+		grpcServerErr = make(chan error, 1)
+		myLog.Log.Info("Running gRPC server on: ", zap.String("address", cfg.Server.GRPCAddr))
+		go func() {
+			grpcServerErr <- grpcServer.Serve(grpcListener)
+		}()
+	}
+
 	select {
-	case err := <-serverErr:
+	case err := <-httpServerErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("could not start server: %v", err)
+		}
+	case err := <-grpcServerErr:
+		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			log.Fatalf("could not start gRPC server: %v", err)
 		}
 	case <-signalCtx.Done():
 		myLog.Log.Info("shutdown signal received")
@@ -225,8 +254,27 @@ func main() {
 			}
 		}
 
-		if err := <-serverErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := <-httpServerErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			myLog.Log.Error("server stopped with error", zap.Error(err))
+		}
+
+		if grpcServer != nil {
+			grpcStopped := make(chan struct{})
+			go func() {
+				grpcServer.GracefulStop()
+				close(grpcStopped)
+			}()
+
+			select {
+			case <-grpcStopped:
+			case <-shutdownCtx.Done():
+				grpcServer.Stop()
+				<-grpcStopped
+			}
+
+			if err := <-grpcServerErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				myLog.Log.Error("gRPC server stopped with error", zap.Error(err))
+			}
 		}
 	}
 

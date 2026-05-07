@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net"
 	"os"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -26,9 +27,11 @@ type DBConfig struct {
 
 // ServerConfig - сетевые и общие настройки HTTP-сервера.
 type ServerConfig struct {
-	RunAddr  string `env:"ADDRESS"`
-	LogLevel string `env:"LOG_LEVEL"`
-	Key      string `env:"KEY"`
+	RunAddr       string `env:"ADDRESS"`
+	GRPCAddr      string `env:"GRPC_ADDRESS"`
+	LogLevel      string `env:"LOG_LEVEL"`
+	Key           string `env:"KEY"`
+	TrustedSubnet string `env:"TRUSTED_SUBNET"`
 }
 
 // StorageConfig - настройки файлового хранилища метрик.
@@ -52,6 +55,7 @@ type CryptoConfig struct {
 
 type fileConfig struct {
 	Address       *string                    `json:"address"`
+	GRPCAddress   *string                    `json:"grpc_address"`
 	LogLevel      *string                    `json:"log_level"`
 	Key           *string                    `json:"key"`
 	Restore       *bool                      `json:"restore"`
@@ -61,6 +65,7 @@ type fileConfig struct {
 	AuditFile     *string                    `json:"audit_file"`
 	AuditURL      *string                    `json:"audit_url"`
 	CryptoKey     *string                    `json:"crypto_key"`
+	TrustedSubnet *string                    `json:"trusted_subnet"`
 }
 
 func parseConfig() Config {
@@ -102,8 +107,10 @@ func parseConfigArgs(args []string) (Config, error) {
 	fs.SetOutput(io.Discard)
 
 	fs.StringVar(&cfg.Server.RunAddr, "a", cfg.Server.RunAddr, "Run server address")
+	fs.StringVar(&cfg.Server.GRPCAddr, "g", cfg.Server.GRPCAddr, "Run gRPC server address")
 	fs.StringVar(&cfg.Server.LogLevel, "l", cfg.Server.LogLevel, "log level")
 	fs.StringVar(&cfg.Server.Key, "k", cfg.Server.Key, "Hash key")
+	fs.StringVar(&cfg.Server.TrustedSubnet, "t", cfg.Server.TrustedSubnet, "trusted subnet in CIDR notation")
 	fs.IntVar(&cfg.Storage.StoreInterval, "i", cfg.Storage.StoreInterval, "store interval in seconds (0 for sync)")
 	fs.StringVar(&cfg.Storage.FileStoragePath, "f", cfg.Storage.FileStoragePath, "file storage path")
 	fs.BoolVar(&cfg.Storage.Restore, "r", cfg.Storage.Restore, "restore metrics from file on startup")
@@ -153,12 +160,21 @@ func parseConfigArgs(args []string) (Config, error) {
 		cfg.Storage.StoreInterval = 0
 	}
 
+	if cfg.Server.TrustedSubnet != "" {
+		if _, _, err := net.ParseCIDR(cfg.Server.TrustedSubnet); err != nil {
+			return Config{}, err
+		}
+	}
+
 	return cfg, nil
 }
 
 func (fc fileConfig) apply(cfg *Config) {
 	if fc.Address != nil {
 		cfg.Server.RunAddr = *fc.Address
+	}
+	if fc.GRPCAddress != nil {
+		cfg.Server.GRPCAddr = *fc.GRPCAddress
 	}
 	if fc.LogLevel != nil {
 		cfg.Server.LogLevel = *fc.LogLevel
@@ -186,5 +202,8 @@ func (fc fileConfig) apply(cfg *Config) {
 	}
 	if fc.CryptoKey != nil {
 		cfg.Crypto.KeyPath = *fc.CryptoKey
+	}
+	if fc.TrustedSubnet != nil {
+		cfg.Server.TrustedSubnet = *fc.TrustedSubnet
 	}
 }

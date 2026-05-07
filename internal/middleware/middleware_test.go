@@ -198,3 +198,79 @@ func TestCryptoMiddlewareBeforeGzipMiddleware(t *testing.T) {
 		t.Fatalf("id = %v, want Alloc", got["id"])
 	}
 }
+
+func TestTrustedSubnetMiddlewareAllowsMetricWritesFromTrustedIP(t *testing.T) {
+	handler := TrustedSubnetMiddleware("192.168.10.0/24")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/updates", nil)
+	req.Header.Set("X-Real-IP", "192.168.10.23")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestTrustedSubnetMiddlewareRejectsMetricWritesOutsideTrustedSubnet(t *testing.T) {
+	handler := TrustedSubnetMiddleware("192.168.10.0/24")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	tests := []struct {
+		name string
+		ip   string
+	}{
+		{name: "outside subnet", ip: "192.168.11.23"},
+		{name: "empty ip", ip: ""},
+		{name: "bad ip", ip: "not-an-ip"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/update/gauge/Alloc/1", nil)
+			req.Header.Set("X-Real-IP", tt.ip)
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+			}
+		})
+	}
+}
+
+func TestTrustedSubnetMiddlewareDoesNotRestrictReads(t *testing.T) {
+	handler := TrustedSubnetMiddleware("192.168.10.0/24")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/value/gauge/Alloc", nil)
+	req.Header.Set("X-Real-IP", "203.0.113.7")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestTrustedSubnetMiddlewareEmptySubnetDoesNotRestrictMetricWrites(t *testing.T) {
+	handler := TrustedSubnetMiddleware("")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/updates", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}

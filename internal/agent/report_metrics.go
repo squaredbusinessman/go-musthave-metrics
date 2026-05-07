@@ -72,7 +72,8 @@ func SendMetric(ctx context.Context, client *resty.Client, m *models.Metric, key
 	if err := retry.Do(ctx, isRetryableNetErr, func() error {
 		req := client.R().
 			SetContext(ctx).
-			SetHeader("Content-Type", "text/plain")
+			SetHeader("Content-Type", "text/plain").
+			SetHeader(headerXRealIP, HostIP())
 		if key != "" {
 			req.SetHeader("HashSHA256", sha256hex(nil, key))
 		}
@@ -125,6 +126,7 @@ func sendMetricsBatchJSON(ctx context.Context, client *resty.Client, metrics []m
 			SetContext(ctx).
 			SetHeader("Content-Type", "application/json").
 			SetHeader("Content-Encoding", "gzip").
+			SetHeader(headerXRealIP, HostIP()).
 			SetBody(body)
 
 		if encrypted {

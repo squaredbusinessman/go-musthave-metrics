@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestParseConfigArgsDefaultGRPCAddressIsEmpty(t *testing.T) {
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got := cfg.Server.GRPCAddr; got != "" {
+		t.Fatalf("Server.GRPCAddr = %q, want empty", got)
+	}
+}
+
 func TestParseConfigArgsAuditFromFlags(t *testing.T) {
 	cfg, err := parseConfigArgs([]string{"--audit-file", "/tmp/audit.log", "--audit-url", "http://localhost:8081/audit"})
 	if err != nil {
@@ -61,10 +72,65 @@ func TestParseConfigArgsCryptoKeyFromEnv(t *testing.T) {
 	}
 }
 
+func TestParseConfigArgsTrustedSubnetFromFlag(t *testing.T) {
+	cfg, err := parseConfigArgs([]string{"-t", "192.168.1.0/24"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.TrustedSubnet, "192.168.1.0/24"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsTrustedSubnetFromEnv(t *testing.T) {
+	t.Setenv("TRUSTED_SUBNET", "10.10.0.0/16")
+
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.TrustedSubnet, "10.10.0.0/16"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsGRPCAddressFromFlag(t *testing.T) {
+	cfg, err := parseConfigArgs([]string{"-g", ":3300"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.GRPCAddr, ":3300"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsGRPCAddressFromEnv(t *testing.T) {
+	t.Setenv("GRPC_ADDRESS", ":3400")
+
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got, want := cfg.Server.GRPCAddr, ":3400"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
+	}
+}
+
+func TestParseConfigArgsRejectsInvalidTrustedSubnet(t *testing.T) {
+	if _, err := parseConfigArgs([]string{"-t", "not-a-cidr"}); err == nil {
+		t.Fatalf("expected invalid trusted subnet error")
+	}
+}
+
 func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "server-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3300",
 		"log_level": "debug",
 		"key": "secret",
 		"restore": false,
@@ -73,7 +139,8 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 		"database_dsn": "postgres://localhost/db",
 		"audit_file": "/tmp/audit.log",
 		"audit_url": "http://localhost:8081/audit",
-		"crypto_key": "/tmp/private.pem"
+		"crypto_key": "/tmp/private.pem",
+		"trusted_subnet": "172.16.0.0/12"
 	}`)
 	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
@@ -86,6 +153,9 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Server.RunAddr, "localhost:9090"; got != want {
 		t.Fatalf("Server.RunAddr = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.GRPCAddr, "localhost:3300"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.Server.LogLevel, "debug"; got != want {
 		t.Fatalf("Server.LogLevel = %q, want %q", got, want)
@@ -117,24 +187,31 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	if got, want := cfg.Crypto.KeyPath, "/tmp/private.pem"; got != want {
 		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
 	}
+	if got, want := cfg.Server.TrustedSubnet, "172.16.0.0/12"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
+	}
 }
 
 func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "server-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3300",
 		"restore": false,
 		"store_interval": "5s",
 		"store_file": "/tmp/from-config.json",
 		"database_dsn": "postgres://config/db",
-		"crypto_key": "/tmp/config.pem"
+		"crypto_key": "/tmp/config.pem",
+		"trusted_subnet": "172.16.0.0/12"
 	}`)
 	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
 
 	t.Setenv("ADDRESS", "localhost:7070")
+	t.Setenv("GRPC_ADDRESS", "localhost:3400")
 	t.Setenv("DATABASE_DSN", "postgres://env/db")
+	t.Setenv("TRUSTED_SUBNET", "10.0.0.0/8")
 
 	cfg, err := parseConfigArgs([]string{
 		"-c", configPath,
@@ -149,6 +226,9 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Server.RunAddr, "localhost:7070"; got != want {
 		t.Fatalf("Server.RunAddr = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.GRPCAddr, "localhost:3400"; got != want {
+		t.Fatalf("Server.GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.Storage.Restore, true; got != want {
 		t.Fatalf("Storage.Restore = %v, want %v", got, want)
@@ -167,5 +247,8 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	}
 	if got, want := cfg.Crypto.KeyPath, "/tmp/flag.pem"; got != want {
 		t.Fatalf("Crypto.KeyPath = %q, want %q", got, want)
+	}
+	if got, want := cfg.Server.TrustedSubnet, "10.0.0.0/8"; got != want {
+		t.Fatalf("Server.TrustedSubnet = %q, want %q", got, want)
 	}
 }

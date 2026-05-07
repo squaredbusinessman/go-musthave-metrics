@@ -29,6 +29,7 @@ func TestNormalizeReportFormat(t *testing.T) {
 func TestParseConfigArgs(t *testing.T) {
 	cfg, err := parseConfigArgs([]string{
 		"-a", "localhost:9090",
+		"-g", "localhost:3200",
 		"-p", "3",
 		"-r", "12",
 		"-f", "JSON",
@@ -42,6 +43,9 @@ func TestParseConfigArgs(t *testing.T) {
 
 	if cfg.Addr != "localhost:9090" {
 		t.Fatalf("Addr = %q, want %q", cfg.Addr, "localhost:9090")
+	}
+	if cfg.GRPCAddr != "localhost:3200" {
+		t.Fatalf("GRPCAddr = %q, want %q", cfg.GRPCAddr, "localhost:3200")
 	}
 	if cfg.PollInterval != 3 {
 		t.Fatalf("PollInterval = %d, want 3", cfg.PollInterval)
@@ -67,6 +71,7 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "agent-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3200",
 		"poll_interval": "3s",
 		"report_interval": "12s",
 		"report_format": "JSON",
@@ -85,6 +90,9 @@ func TestParseConfigArgsFromJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Addr, "localhost:9090"; got != want {
 		t.Fatalf("Addr = %q, want %q", got, want)
+	}
+	if got, want := cfg.GRPCAddr, "localhost:3200"; got != want {
+		t.Fatalf("GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.PollInterval, 3; got != want {
 		t.Fatalf("PollInterval = %d, want %d", got, want)
@@ -110,6 +118,7 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "agent-config.json")
 	configData := []byte(`{
 		"address": "localhost:9090",
+		"grpc_address": "localhost:3200",
 		"poll_interval": "3s",
 		"report_interval": "12s",
 		"report_format": "plain",
@@ -122,6 +131,7 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 	}
 
 	t.Setenv("ADDRESS", "localhost:7070")
+	t.Setenv("GRPC_ADDRESS", "localhost:3300")
 	t.Setenv("RATE_LIMIT", "8")
 
 	cfg, err := parseConfigArgs([]string{
@@ -138,6 +148,9 @@ func TestParseConfigArgsPriorityOverJSONConfig(t *testing.T) {
 
 	if got, want := cfg.Addr, "localhost:7070"; got != want {
 		t.Fatalf("Addr = %q, want %q", got, want)
+	}
+	if got, want := cfg.GRPCAddr, "localhost:3300"; got != want {
+		t.Fatalf("GRPCAddr = %q, want %q", got, want)
 	}
 	if got, want := cfg.PollInterval, 6; got != want {
 		t.Fatalf("PollInterval = %d, want %d", got, want)

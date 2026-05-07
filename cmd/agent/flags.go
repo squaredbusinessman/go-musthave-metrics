@@ -15,6 +15,7 @@ import (
 // Config - конфигурация агента отправки метрик.
 type Config struct {
 	Addr           string `env:"ADDRESS"`
+	GRPCAddr       string `env:"GRPC_ADDRESS"`
 	PollInterval   int    `env:"POLL_INTERVAL"`
 	ReportInterval int    `env:"REPORT_INTERVAL"`
 	ReportFormat   string `env:"REPORT_FORMAT"`
@@ -25,6 +26,7 @@ type Config struct {
 
 type fileConfig struct {
 	Address        *string                    `json:"address"`
+	GRPCAddress    *string                    `json:"grpc_address"`
 	PollInterval   *appconfig.DurationSeconds `json:"poll_interval"`
 	ReportInterval *appconfig.DurationSeconds `json:"report_interval"`
 	ReportFormat   *string                    `json:"report_format"`
@@ -67,6 +69,7 @@ func parseConfigArgs(args []string) (Config, error) {
 	fs.SetOutput(io.Discard)
 
 	fs.StringVar(&cfg.Addr, "a", cfg.Addr, "Run server address")
+	fs.StringVar(&cfg.GRPCAddr, "g", cfg.GRPCAddr, "gRPC server address")
 	fs.IntVar(&cfg.PollInterval, "p", cfg.PollInterval, "Poll interval(seconds)")
 	fs.IntVar(&cfg.ReportInterval, "r", cfg.ReportInterval, "Report interval(seconds)")
 	fs.StringVar(&cfg.ReportFormat, "f", cfg.ReportFormat, "Report format: plain or json")
@@ -101,6 +104,9 @@ func normalizeReportFormat(value string) string {
 func (fc fileConfig) apply(cfg *Config) {
 	if fc.Address != nil {
 		cfg.Addr = *fc.Address
+	}
+	if fc.GRPCAddress != nil {
+		cfg.GRPCAddr = *fc.GRPCAddress
 	}
 	if fc.PollInterval != nil {
 		cfg.PollInterval = fc.PollInterval.Seconds()

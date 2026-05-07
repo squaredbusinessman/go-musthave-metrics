@@ -2,12 +2,16 @@
 
 ## Общее описание
 Проект состоит из двух приложений:
-- **Агент**: собирает метрики (runtime и gopsutil) и отправляет их на сервер.
+- **Агент**: собирает метрики (runtime и gopsutil) и отправляет их на сервер через HTTP или gRPC.
 - **Сервер**: принимает, хранит и отдаёт метрики (в памяти, файле или PostgreSQL).
 
-Передача метрик от агента к серверу поддерживает gzip-сжатие, подпись `HashSHA256`
-и опциональное асимметричное шифрование. Для шифрования используется гибридная
-схема: тело запроса шифруется случайным AES-256-GCM ключом, а сам AES-ключ
+HTTP-передача метрик от агента к серверу поддерживает gzip-сжатие, подпись `HashSHA256`
+и опциональное асимметричное шифрование. gRPC-передача использует protobuf-контракт
+`internal/proto/metrics.proto`, отправляет метрики батчами через `Metrics.UpdateMetrics`
+и передаёт IP агента в metadata `x-real-ip`.
+
+Для HTTP-шифрования используется гибридная схема: тело запроса шифруется
+случайным AES-256-GCM ключом, а сам AES-ключ
 шифруется публичным RSA-ключом через RSA-OAEP/SHA-256. Такой подход выбран,
 потому что RSA не подходит для шифрования больших JSON/gzip payload целиком:
 размер RSA-блока ограничен длиной ключа и схемой padding. AES-GCM эффективно
@@ -36,6 +40,7 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
 ### Структуры
 - `type Config` — конфигурация агента. Поля:
   - `Addr` (string): адрес сервера.
+  - `GRPCAddr` (string): адрес gRPC-сервера; если задан, агент отправляет метрики через gRPC.
   - `PollInterval` (int): интервал опроса runtime/gopsutil метрик в секундах.
   - `ReportInterval` (int): интервал отправки метрик в секундах.
   - `ReportFormat` (string): формат отправки (`plain` или `json`).
@@ -46,7 +51,7 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
 
 ### Функции
 - `func main()`
-  - Запускает агент: инициализация логгера, парсинг конфигурации, загрузка публичного ключа шифрования, создание worker pool, запуск горутин сбора и отправки.
+  - Запускает агент: инициализация логгера, парсинг конфигурации, загрузка публичного ключа шифрования, создание HTTP/gRPC клиента, создание worker pool, запуск горутин сбора и отправки.
   - Вход: конфигурация через флаги и ENV.
   - Выход: бесконечная работа агента, ошибки критичны (log.Fatalf).
   - Код: [cmd/agent/main.go](cmd/agent/main.go)
@@ -76,9 +81,11 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
   - Код: [cmd/server/flags.go](cmd/server/flags.go)
 
 - `type ServerConfig`
-  - `RunAddr` (string): адрес сервера.
+  - `RunAddr` (string): адрес HTTP-сервера.
+  - `GRPCAddr` (string): адрес gRPC-сервера; если пустой, gRPC listener не запускается.
   - `LogLevel` (string): уровень логирования.
   - `Key` (string): ключ подписи (HashSHA256).
+  - `TrustedSubnet` (string): доверенная подсеть в CIDR для проверки IP агента.
   - Код: [cmd/server/flags.go](cmd/server/flags.go)
 
 - `type StorageConfig`
@@ -103,14 +110,14 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
 
 ### Функции
 - `func main()`
-  - Инициализирует логгер, загружает приватный ключ шифрования, выбирает хранилище (mem/file/pg), поднимает HTTP-сервер, подключает middleware.
+  - Инициализирует логгер, загружает приватный ключ шифрования, выбирает хранилище (mem/file/pg), поднимает HTTP-сервер и при заданном `GRPCAddr` gRPC-сервер, подключает middleware/interceptor.
   - Вход: конфигурация через флаги и ENV.
-  - Выход: слушает HTTP, завершает работу при фатальных ошибках.
+  - Выход: слушает HTTP и gRPC, завершает работу при фатальных ошибках.
   - Код: [cmd/server/main.go](cmd/server/main.go)
 
-- `func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey) http.Handler`
-  - Собирает HTTP router и подключает middleware в порядке `Crypto -> Gzip -> Hash -> Handler`.
-  - Вход: handler, ключ подписи, приватный ключ расшифровки.
+- `func buildRouter(h *handler.Handler, key string, privateKey *rsa.PrivateKey, trustedSubnet string) http.Handler`
+  - Собирает HTTP router и подключает middleware в порядке `TrustedSubnet -> Crypto -> Gzip -> Hash -> Handler`.
+  - Вход: handler, ключ подписи, приватный ключ расшифровки, доверенная подсеть.
   - Выход: готовый `http.Handler`.
   - Код: [cmd/server/main.go](cmd/server/main.go)
 
@@ -152,12 +159,30 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
   - Выход: `error` при сетевых/HTTP ошибках.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
 
+- `func NewGRPCClient(addr string) (*grpc.ClientConn, proto.MetricsClient, error)`
+  - Создаёт gRPC-клиент для сервиса `Metrics`.
+  - Вход: адрес gRPC-сервера.
+  - Выход: соединение, клиент и ошибка инициализации.
+  - Код: [internal/agent/grpc_client.go](internal/agent/grpc_client.go)
+
+- `func SendMetricsBatchGRPC(ctx context.Context, client proto.MetricsClient, metrics []models.Metrics) error`
+  - Формирует `UpdateMetricsRequest`, добавляет metadata `x-real-ip` и вызывает gRPC-метод `UpdateMetrics`.
+  - Вход: контекст, gRPC-клиент, список метрик.
+  - Выход: `error` при ошибке RPC.
+  - Код: [internal/agent/grpc_client.go](internal/agent/grpc_client.go)
+
 - `func ReportMetrics(client *resty.Client, store *storage.MemStorage, reportFormat string, key string, publicKey *rsa.PublicKey, jobs chan<- Job)`
   - Снимает snapshot из `MemStorage` и ставит задачи отправки в канал `jobs`.
   - Если публичный ключ задан, принудительно использует JSON batch-режим, потому что plain-режим передаёт значения метрик в URL и не может быть зашифрован как body.
   - Вход: REST клиент, хранилище, формат, ключ подписи, публичный ключ шифрования, канал задач.
   - Выход: задачи в очередь; ошибки логируются воркерами.
   - Код: [internal/agent/report_metrics.go](internal/agent/report_metrics.go)
+
+- `func ReportMetricsGRPC(ctx context.Context, client proto.MetricsClient, store *storage.MemStorage, jobs chan<- Job) error`
+  - Снимает snapshot из `MemStorage` и ставит в очередь одну задачу gRPC-отправки батча.
+  - Вход: контекст, gRPC-клиент, хранилище, канал задач.
+  - Выход: задача в очередь или ошибка контекста/snapshot.
+  - Код: [internal/agent/grpc_client.go](internal/agent/grpc_client.go)
 
 - `func snapshotToMetrics(gauges map[string]models.Gauge, counters map[string]models.Counter) []models.Metrics`
   - Конвертирует snapshot в список `Metrics`.
@@ -401,6 +426,55 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
   - Вход: строка уровня.
   - Выход: ошибка инициализации (если есть).
   - Код: [internal/logger/logger.go](internal/logger/logger.go)
+
+---
+
+## internal/grpcserver
+Назначение: gRPC-адаптер сервера метрик и interceptor проверки доверенной подсети.
+
+Ссылка на пакет: `internal/grpcserver/`
+
+### Структуры
+- `type Server`
+  - Реализует сгенерированный интерфейс `proto.MetricsServer`.
+  - Хранит ссылку на общий `service.MetricsService`.
+  - Код: [internal/grpcserver/server.go](internal/grpcserver/server.go)
+
+### Функции/методы
+- `func New(metrics service.MetricsService) *Server`
+  - Создаёт реализацию gRPC-сервиса Metrics.
+  - Вход: общий сервис метрик.
+  - Выход: реализация gRPC-сервера.
+  - Код: [internal/grpcserver/server.go](internal/grpcserver/server.go)
+
+- `func (s *Server) UpdateMetrics(ctx context.Context, req *proto.UpdateMetricsRequest) (*proto.UpdateMetricsResponse, error)`
+  - Принимает protobuf-батч, конвертирует его в `models.Metrics` и вызывает `MetricsService.UpdateMetricsBatch`.
+  - Вход: контекст и protobuf-запрос.
+  - Выход: пустой protobuf-ответ или gRPC status error.
+  - Код: [internal/grpcserver/server.go](internal/grpcserver/server.go)
+
+- `func TrustedSubnetInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor`
+  - Проверяет metadata `x-real-ip` по CIDR-подсети.
+  - Если подсеть не задана, пропускает запросы без проверки.
+  - Если подсеть задана в неверном CIDR-формате, считает это ошибкой конфигурации и останавливает запуск.
+  - При запрете возвращает `codes.PermissionDenied`.
+  - Код: [internal/grpcserver/interceptor.go](internal/grpcserver/interceptor.go)
+
+---
+
+## internal/proto
+Назначение: protobuf/gRPC-контракт обмена метриками.
+
+Ссылка на пакет: `internal/proto/`
+
+### Файлы
+- `metrics.proto`
+  - Описывает сообщения `Metric`, `UpdateMetricsRequest`, `UpdateMetricsResponse` и сервис `Metrics`.
+  - Код: [internal/proto/metrics.proto](internal/proto/metrics.proto)
+
+- `metrics.pb.go`, `metrics_grpc.pb.go`
+  - Сгенерированный Go-код protobuf-сообщений, gRPC-клиента и gRPC-сервера.
+  - Эти файлы не редактируются вручную; при изменении протокола нужно перегенерировать код из `.proto`.
 
 ---
 
@@ -657,34 +731,47 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
 ---
 
 ## Покрытие тестами
-Данные получены из `go test ./... -coverprofile=coverage.out` и `go tool cover -func=coverage.out`.
+Данные получены командами:
 
-**Общее покрытие проекта:** 27.4% (statements).
+```bash
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+```
+
+**Общее покрытие проекта:** 45.7% (statements).
 
 **По пакетам:**
-- `cmd/agent`: 0.0%
-- `cmd/server`: 0.0%
-- `internal/agent`: 55.1%
-- `internal/apperr`: 0.0%
-- `internal/handler`: 24.1%
-- `internal/logger`: 0.0%
-- `internal/middleware`: 23.2%
+- `cmd/agent`: 32.6%
+- `cmd/reset`: 0.0%
+- `cmd/server`: 36.1%
+- `cmd/staticlint`: 59.0%
+- `internal/agent`: 64.9%
+- `internal/apperr`: 100.0%
+- `internal/audit`: 73.2%
+- `internal/buildinfo`: 100.0%
+- `internal/config`: 60.5%
+- `internal/cryptoutil`: 62.5%
+- `internal/grpcserver`: 0.0%
+- `internal/handler`: 60.0%
+- `internal/logger`: 94.1%
+- `internal/middleware`: 74.2%
 - `internal/model`: 100.0%
-- `internal/repository`: 30.8%
+- `internal/proto`: 0.0%
+- `internal/repository`: 49.6%
 - `internal/retry`: 73.7%
-- `internal/service`: 0.0%
+- `internal/service`: 80.5%
 - `migrations`: 0.0%
+- `pkg/pool`: 89.5%
 
 ---
 
 ## TODO
 1) **Тесты:**
-   - Добавить тесты для `internal/service` (валидация, ошибки, batch).
-   - Покрыть `internal/apperr` и `internal/logger`.
-   - Добавить интеграционные тесты HTTP‑хендлеров с middleware.
+   - Добавить unit-тесты для `internal/grpcserver`: конвертация protobuf-метрик, mapping ошибок и `TrustedSubnetInterceptor`.
+   - Добавить тесты для `cmd/agent.reportMetrics`, чтобы явно зафиксировать выбор HTTP/gRPC транспорта.
+   - Решить, учитывать ли сгенерированный `internal/proto` в общем coverage profile или исключать его из отчёта.
 2) **Worker pool:**
-   - Добавить graceful shutdown (закрытие канала jobs, ожидание воркеров).
-   - Добавить защиту от переполнения очереди (метрика/лог).
+   - Добавить метрику или лог для переполнения очереди отправки.
 3) **gopsutil:**
    - Логировать ошибки при чтении CPU/mem.
    - Добавить поддержку missing permissions в контейнерах.

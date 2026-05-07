@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/agent"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/buildinfo"
 	"github.com/squaredbusinessman/go-musthave-metrics/internal/cryptoutil"
 	myLog "github.com/squaredbusinessman/go-musthave-metrics/internal/logger"
+	pb "github.com/squaredbusinessman/go-musthave-metrics/internal/proto"
 	storage "github.com/squaredbusinessman/go-musthave-metrics/internal/repository"
 	"go.uber.org/zap"
 )
@@ -61,8 +63,23 @@ func main() {
 	randS := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	client := agent.NewHTTPClient(cfg.Addr, timeout, retryCount, waitTime, maxWaitTime)
-
 	defer client.GetClient().CloseIdleConnections()
+
+	var grpcClient pb.MetricsClient
+	var closeGRPC func() error
+	if cfg.GRPCAddr != "" {
+		conn, metricsClient, err := agent.NewGRPCClient(cfg.GRPCAddr)
+		if err != nil {
+			log.Fatalf("init gRPC client failure: %v", err)
+		}
+		grpcClient = metricsClient
+		closeGRPC = conn.Close
+		defer func() {
+			if err := closeGRPC(); err != nil {
+				myLog.Log.Warn("gRPC client close failure", zap.Error(err))
+			}
+		}()
+	}
 
 	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()
@@ -120,7 +137,7 @@ func main() {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if err := agent.ReportMetrics(runCtx, client, store, cfg.ReportFormat, cfg.Key, publicKey, jobs); err != nil && runCtx.Err() == nil {
+				if err := reportMetrics(runCtx, cfg, client, grpcClient, store, publicKey, jobs); err != nil && runCtx.Err() == nil {
 					myLog.Log.Error("report metrics failure", zap.Error(err))
 				}
 			}
@@ -136,7 +153,7 @@ func main() {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancelShutdown()
 
-	if err := agent.ReportMetrics(shutdownCtx, client, store, cfg.ReportFormat, cfg.Key, publicKey, jobs); err != nil && !logContextDone(err) {
+	if err := reportMetrics(shutdownCtx, cfg, client, grpcClient, store, publicKey, jobs); err != nil && !logContextDone(err) {
 		myLog.Log.Warn("final report metrics failure", zap.Error(err))
 	}
 
@@ -144,6 +161,22 @@ func main() {
 	if err := workerPool.Wait(shutdownCtx); err != nil {
 		myLog.Log.Warn("worker pool shutdown failure", zap.Error(err))
 	}
+}
+
+func reportMetrics(
+	ctx context.Context,
+	cfg Config,
+	httpClient *resty.Client,
+	grpcClient pb.MetricsClient,
+	store *storage.MemStorage,
+	publicKey *rsa.PublicKey,
+	jobs chan<- agent.Job,
+) error {
+	if cfg.GRPCAddr != "" {
+		return agent.ReportMetricsGRPC(ctx, grpcClient, store, jobs)
+	}
+
+	return agent.ReportMetrics(ctx, httpClient, store, cfg.ReportFormat, cfg.Key, publicKey, jobs)
 }
 
 func logContextDone(err error) bool {
