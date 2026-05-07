@@ -35,5 +35,6 @@ go run ./cmd/server -a :8080 -g :3200
 Если задан `TRUSTED_SUBNET`, HTTP middleware проверяет заголовок `X-Real-IP`, а gRPC
 interceptor проверяет metadata `x-real-ip`. Запросы на запись метрик вне подсети
 отклоняются.
+Неверный `TRUSTED_SUBNET` считается ошибкой конфигурации и останавливает запуск сервера.
 
 Если `GRPC_ADDRESS` не задан, gRPC listener не запускается.

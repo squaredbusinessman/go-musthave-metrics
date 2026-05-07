@@ -88,6 +88,7 @@ go run ./cmd/agent -g localhost:3200
 Для проверки доверенной подсети агент передаёт свой IP в metadata `x-real-ip`.
 Если на сервере задан `TRUSTED_SUBNET`, gRPC `UnaryInterceptor` проверяет этот IP.
 При запрете сервер возвращает `codes.PermissionDenied`.
+Неверный `TRUSTED_SUBNET` считается ошибкой конфигурации и останавливает запуск сервера.
 
 Пример запуска с проверкой подсети:
 

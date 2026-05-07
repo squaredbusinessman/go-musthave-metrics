@@ -456,6 +456,7 @@ ciphertext, а RSA-OAEP безопасно передаёт одноразовы
 - `func TrustedSubnetInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor`
   - Проверяет metadata `x-real-ip` по CIDR-подсети.
   - Если подсеть не задана, пропускает запросы без проверки.
+  - Если подсеть задана в неверном CIDR-формате, считает это ошибкой конфигурации и останавливает запуск.
   - При запрете возвращает `codes.PermissionDenied`.
   - Код: [internal/grpcserver/interceptor.go](internal/grpcserver/interceptor.go)
 

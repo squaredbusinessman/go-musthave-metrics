@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 
@@ -23,9 +24,7 @@ func TrustedSubnetInterceptor(trustedSubnet string) grpc.UnaryServerInterceptor 
 
 	_, subnet, err := net.ParseCIDR(trustedSubnet)
 	if err != nil {
-		return func(context.Context, any, *grpc.UnaryServerInfo, grpc.UnaryHandler) (any, error) {
-			return nil, status.Error(codes.PermissionDenied, "forbidden")
-		}
+		panic(fmt.Sprintf("invalid trusted subnet %q: %v", trustedSubnet, err))
 	}
 
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
