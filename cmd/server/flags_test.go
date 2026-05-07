@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestParseConfigArgsDefaultGRPCAddressIsEmpty(t *testing.T) {
+	cfg, err := parseConfigArgs(nil)
+	if err != nil {
+		t.Fatalf("parseConfigArgs() error = %v", err)
+	}
+
+	if got := cfg.Server.GRPCAddr; got != "" {
+		t.Fatalf("Server.GRPCAddr = %q, want empty", got)
+	}
+}
+
 func TestParseConfigArgsAuditFromFlags(t *testing.T) {
 	cfg, err := parseConfigArgs([]string{"--audit-file", "/tmp/audit.log", "--audit-url", "http://localhost:8081/audit"})
 	if err != nil {

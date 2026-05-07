@@ -1,35 +1,100 @@
-# go-musthave-metrics-tpl
+# go-musthave-metrics
 
-Шаблон репозитория для трека «Сервер сбора метрик и алертинга».
+Сервис сбора метрик и алертинга для трека Яндекс Практикума.
 
-## Начало работы
+Проект состоит из двух приложений:
 
-1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
-2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
+- `cmd/server` — принимает, хранит и отдаёт метрики через HTTP и gRPC.
+- `cmd/agent` — собирает runtime/gopsutil-метрики и отправляет их на сервер.
 
-## Обновление шаблона
+Метрики можно хранить в памяти, файле или PostgreSQL. HTTP-транспорт поддерживает gzip,
+`HashSHA256`, RSA/AES-GCM шифрование и проверку доверенной подсети. gRPC-транспорт
+отправляет метрики батчами через `Metrics.UpdateMetrics` и передаёт IP агента в metadata
+`x-real-ip`.
 
-Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:
+## Быстрый запуск
 
+Запустить сервер только с HTTP на `:8080`:
+
+```bash
+go run ./cmd/server -a :8080
 ```
-git remote add -m v2 template https://github.com/Yandex-Practicum/go-musthave-metrics-tpl.git
+
+Запустить сервер с HTTP на `:8080` и gRPC на `:3200`:
+
+```bash
+go run ./cmd/server -a :8080 -g :3200
 ```
 
-Для обновления кода автотестов выполните команду:
+Запустить агент через HTTP:
 
+```bash
+go run ./cmd/agent -a localhost:8080
 ```
-git fetch template && git checkout template/v2 .github
+
+Запустить агент через gRPC:
+
+```bash
+go run ./cmd/agent -g localhost:3200
 ```
 
-Затем добавьте полученные изменения в свой репозиторий.
+Если `-g`/`GRPC_ADDRESS` у сервера не задан, gRPC listener не запускается. Если
+`-g`/`GRPC_ADDRESS` у агента не задан, используется HTTP-отправка. Если задан,
+агент отправляет батчи через gRPC на указанный адрес.
 
-## Запуск автотестов
+## Конфигурация сервера
 
-Для успешного запуска автотестов называйте ветки `iter<number>`, где `<number>` — порядковый номер инкремента. Например, в ветке с названием `iter4` запустятся автотесты для инкрементов с первого по четвёртый.
+Параметры можно задавать флагами, переменными окружения или JSON-конфигом.
 
-При мёрже ветки с инкрементом в основную ветку `main` будут запускаться все автотесты.
+| Назначение | Флаг | ENV | JSON | По умолчанию |
+| --- | --- | --- | --- | --- |
+| HTTP-адрес | `-a` | `ADDRESS` | `address` | `:8080` |
+| gRPC-адрес | `-g` | `GRPC_ADDRESS` | `grpc_address` | пусто |
+| уровень логирования | `-l` | `LOG_LEVEL` | `log_level` | `info` |
+| ключ подписи | `-k` | `KEY` | `key` | пусто |
+| доверенная подсеть | `-t` | `TRUSTED_SUBNET` | `trusted_subnet` | пусто |
+| интервал сохранения | `-i` | `STORE_INTERVAL` | `store_interval` | `300` |
+| файл хранения | `-f` | `FILE_STORAGE_PATH` | `store_file` | `/tmp/devops-metrics-db.json` |
+| восстановление из файла | `-r` | `RESTORE` | `restore` | `true` |
+| PostgreSQL DSN | `-d` | `DATABASE_DSN` | `database_dsn` | пусто |
+| приватный ключ | `-crypto-key` | `CRYPTO_KEY` | `crypto_key` | пусто |
+| файл аудита | `--audit-file` | `AUDIT_FILE` | `audit_file` | пусто |
+| URL аудита | `--audit-url` | `AUDIT_URL` | `audit_url` | пусто |
 
-Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
+## Конфигурация агента
+
+| Назначение | Флаг | ENV | JSON | По умолчанию |
+| --- | --- | --- | --- | --- |
+| HTTP-адрес сервера | `-a` | `ADDRESS` | `address` | `:8080` |
+| gRPC-адрес сервера | `-g` | `GRPC_ADDRESS` | `grpc_address` | пусто |
+| интервал сбора | `-p` | `POLL_INTERVAL` | `poll_interval` | `2` |
+| интервал отправки | `-r` | `REPORT_INTERVAL` | `report_interval` | `10` |
+| HTTP-формат | `-f` | `REPORT_FORMAT` | `report_format` | `plain` |
+| ключ подписи | `-k` | `KEY` | `key` | пусто |
+| лимит отправки | `-l` | `RATE_LIMIT` | `rate_limit` | `1` |
+| публичный ключ | `-crypto-key` | `CRYPTO_KEY` | `crypto_key` | пусто |
+
+## gRPC
+
+Протокол описан в `internal/proto/metrics.proto`. Сгенерированные Go-файлы лежат рядом:
+
+- `internal/proto/metrics.pb.go`
+- `internal/proto/metrics_grpc.pb.go`
+
+Если задан `GRPC_ADDRESS`, сервер реализует `Metrics.UpdateMetrics` и сохраняет данные
+через общий слой `service.MetricsService`, поэтому HTTP и gRPC используют одну
+бизнес-логику.
+
+Для проверки доверенной подсети агент передаёт свой IP в metadata `x-real-ip`.
+Если на сервере задан `TRUSTED_SUBNET`, gRPC `UnaryInterceptor` проверяет этот IP.
+При запрете сервер возвращает `codes.PermissionDenied`.
+
+Пример запуска с проверкой подсети:
+
+```bash
+go run ./cmd/server -g :3200 -t 192.168.1.0/24
+go run ./cmd/agent -g localhost:3200
+```
 
 ## Форматирование goimports
 
@@ -244,12 +309,14 @@ Dropped 129 nodes (cum <= 1267.61kB)
 Общий coverage profile собран командой:
 
 ```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out | tail -n 1
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
 ```
 
-Итоговое покрытие:
+Актуальный итог:
 
 ```text
-total:													(statements)		43.6%
+total:													(statements)					45.7%
 ```
+
+Пакетная разбивка приведена в [DOCUMENTATION.md](DOCUMENTATION.md#покрытие-тестами).

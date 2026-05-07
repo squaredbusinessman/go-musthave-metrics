@@ -203,17 +203,9 @@ func main() {
 		IdleTimeout:       serverIdleTimeout,
 	}
 
-	grpcListener, err := net.Listen("tcp", cfg.Server.GRPCAddr)
-	if err != nil {
-		log.Fatalf("could not listen gRPC address %s: %v", cfg.Server.GRPCAddr, err)
-	}
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(cfg.Server.TrustedSubnet)),
-	)
-	pb.RegisterMetricsServer(grpcServer, grpcserver.New(metricsService))
-
 	httpServerErr := make(chan error, 1)
-	grpcServerErr := make(chan error, 1)
+	var grpcServer *grpc.Server
+	var grpcServerErr chan error
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stopSignals()
 
@@ -223,10 +215,22 @@ func main() {
 		httpServerErr <- server.ListenAndServe()
 	}()
 
-	myLog.Log.Info("Running gRPC server on: ", zap.String("address", cfg.Server.GRPCAddr))
-	go func() {
-		grpcServerErr <- grpcServer.Serve(grpcListener)
-	}()
+	if cfg.Server.GRPCAddr != "" {
+		grpcListener, err := net.Listen("tcp", cfg.Server.GRPCAddr)
+		if err != nil {
+			log.Fatalf("could not listen gRPC address %s: %v", cfg.Server.GRPCAddr, err)
+		}
+		grpcServer = grpc.NewServer(
+			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(cfg.Server.TrustedSubnet)),
+		)
+		pb.RegisterMetricsServer(grpcServer, grpcserver.New(metricsService))
+
+		grpcServerErr = make(chan error, 1)
+		myLog.Log.Info("Running gRPC server on: ", zap.String("address", cfg.Server.GRPCAddr))
+		go func() {
+			grpcServerErr <- grpcServer.Serve(grpcListener)
+		}()
+	}
 
 	select {
 	case err := <-httpServerErr:
@@ -243,12 +247,6 @@ func main() {
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancelShutdown()
 
-		grpcStopped := make(chan struct{})
-		go func() {
-			grpcServer.GracefulStop()
-			close(grpcStopped)
-		}()
-
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			myLog.Log.Error("server shutdown failure", zap.Error(err))
 			if closeErr := server.Close(); closeErr != nil {
@@ -260,15 +258,23 @@ func main() {
 			myLog.Log.Error("server stopped with error", zap.Error(err))
 		}
 
-		select {
-		case <-grpcStopped:
-		case <-shutdownCtx.Done():
-			grpcServer.Stop()
-			<-grpcStopped
-		}
+		if grpcServer != nil {
+			grpcStopped := make(chan struct{})
+			go func() {
+				grpcServer.GracefulStop()
+				close(grpcStopped)
+			}()
 
-		if err := <-grpcServerErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			myLog.Log.Error("gRPC server stopped with error", zap.Error(err))
+			select {
+			case <-grpcStopped:
+			case <-shutdownCtx.Done():
+				grpcServer.Stop()
+				<-grpcStopped
+			}
+
+			if err := <-grpcServerErr; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				myLog.Log.Error("gRPC server stopped with error", zap.Error(err))
+			}
 		}
 	}
 

@@ -80,7 +80,6 @@ func parseConfigArgs(args []string) (Config, error) {
 	cfg := Config{
 		Server: ServerConfig{
 			RunAddr:  ":8080",
-			GRPCAddr: ":3200",
 			LogLevel: "info",
 		},
 		Storage: StorageConfig{
